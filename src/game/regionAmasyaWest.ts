@@ -1,6 +1,7 @@
 import { tr } from './i18n';
 import type { RoadType } from './roads';
 import type { Industry, CargoContract } from './regions';
+import { WORLD_SCALE } from './scale';
 
 /**
  * Phase 3B — "Amasya batı" expansion (Suluova, Merzifon, Gümüşhacıköy).
@@ -45,7 +46,11 @@ export interface ExpansionLocation {
   id: string; name: string; type: 'industrial'; cityId: string; provinceId: string; industry: Industry;
 }
 
-export const EXPANSION = {
+/**
+ * Authored on the original compressed grid; `EXPANSION` below stretches it to
+ * gameplay scale exactly like the province records in regions.ts do.
+ */
+const SOURCE = {
   cities: [
     {
       id: 'amasya.merzifon', provinceId: 'amasya', displayName: tr.merzifon, x: -1560, z: -760, elevation: EXPANSION_ELEVATION,
@@ -103,4 +108,16 @@ export const EXPANSION = {
     { id: 'tr.grain.suluova', cargo: 'goods', appearance: 'grain', title: tr.cargoGrain, cargoName: tr.cargoWheat, weight: 9400, from: 'merzifon.logistics', to: 'suluova.food', xp: 170, blurb: tr.jobMerzifonSuluova },
     { id: 'tr.metal.merzifon', cargo: 'pallets', title: tr.cargoSteel, cargoName: tr.cargoFittings, weight: 11200, from: 'factory', to: 'merzifon.logistics', xp: 215, blurb: tr.jobMerzifonMetal },
   ] as CargoContract[],
+};
+
+const K = WORLD_SCALE;
+const scalePt = ([x, z]: [number, number]): [number, number] => [x * K, z * K];
+/** The same authored layout, stretched to the gameplay-scale map. */
+export const EXPANSION = {
+  cities: SOURCE.cities.map(c => ({ ...c, x: c.x * K, z: c.z * K })),
+  villages: SOURCE.villages.map(v => ({ ...v, x: v.x * K, z: v.z * K })),
+  junctions: SOURCE.junctions.map(j => ({ ...j, x: j.x * K, z: j.z * K })),
+  roads: SOURCE.roads.map(r => ({ ...r, via: r.via.map(scalePt) })),
+  locations: SOURCE.locations,
+  contracts: SOURCE.contracts,
 };

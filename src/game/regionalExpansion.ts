@@ -11,6 +11,7 @@ import {
 import { lorryInto } from './vehicles';
 import { board, flagPole, mosque } from './turkishProps';
 import { loadingMark, light, ServiceLocation } from './regionalWorld';
+import { buildCityLandmark } from './landmarks';
 import type { Location, Poi } from './world';
 
 /**
@@ -33,7 +34,7 @@ export function extendExpansionNetwork(g: RoadGraph, ports: Record<string, RNode
   for (const r of EXPANSION.roads) {
     const a = ports[r.from], b = ports[r.to];
     if (!a || !b) throw new Error(`Expansion road '${r.id}' references a missing node (${r.from} / ${r.to})`);
-    const e = g.connect(a, b, r.type, r.via);
+    const e = g.connect(a, b, r.type, r.via, { step: Math.hypot(b.x - a.x, b.z - a.z) > 2200 ? 4 : 1.4 });
     e.key = r.id; e.provinceIds = [PROVINCE_BY_ID.amasya.id];
     if (r.routeCode) e.routeCode = r.routeCode;
   }
@@ -164,10 +165,12 @@ function buildCity(c: Ctx, g: RoadGraph, city: ExpansionCity, out: Out) {
   haybale(c, x + 50, z + 150); haybale(c, x + 53.5, z + 150);
   for (let i = 0; i < 14; i++) {
     const a = (i * Math.PI * 2) / 14, px = x + Math.cos(a) * 198, pz = z + Math.sin(a) * 198;
-    if (g.nearest(px, pz).d > 14) tree(c, 'poplar', px, pz, 1.2);
+    if (g.nearest(px, pz).d > 22) tree(c, 'poplar', px, pz, 1.2);
   }
 
   c.B.pop(); c.D.pop();
+  // City identity: profile landmark (medrese, sugar factory, stone bridge...).
+  buildCityLandmark(c, city.id, x, z, g);
   loadingMark(c, loc);
   out.locations[def.id] = loc;
   out.pois.push({ id: city.id, name: city.displayName, x, z, r: 240 });

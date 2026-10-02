@@ -7,12 +7,15 @@ import {
   containerStack, pallet, tank, bench, bin, busStop, picnic, vending, barrels, haybale, parkedCar,
   tractor, fenceLine, poleLine,
 } from './props';
+import { board } from './turkishProps';
 import { lorryInto, makeForklift } from './vehicles';
 import { buildTerrain, buildBridges, riverDecor, riverC, BRIDGES } from './terrain';
 import { tr, t } from './i18n';
 import { PROVINCES, CITIES, City, Industry, Province, EXPANSION_SITES } from './regions';
-import { groundHeight } from './elevation';
+import * as elevation from './elevation';
+import { groundHeight, initRoadProfile } from './elevation';
 import { extendRegionalNetwork, buildRegionalSettlements, localizeCoreLocations, ServiceLocation, loadingMark } from './regionalWorld';
+import { buildRoadside } from './roadside';
 import { extendExpansionNetwork, buildExpansion } from './regionalExpansion';
 
 export interface Location {
@@ -37,6 +40,7 @@ export interface World {
 }
 
 export function buildWorld(): World {
+  (window as any).__elevation = elevation; // diagnostics: grade/height probing from the console
   buildMaterials();
   srand(2024);
   const root = new THREE.Group();
@@ -123,6 +127,10 @@ export function buildWorld(): World {
   const regionalNetwork = extendRegionalNetwork(g, anchors);
   extendExpansionNetwork(g, regionalNetwork.ports);
   g.finalize();
+  // Carve the designed corridor gradients into the terrain now that the routing
+  // graph is final — every later groundHeight() call (roads, terrain mesh, props,
+  // traffic, the truck itself) then reads the same graded surface.
+  initRoadProfile(g);
 
   const rb = buildRoads(g, B, D, GL);
   c.lamps.push(...rb.lamps);
@@ -413,8 +421,23 @@ export function buildWorld(): World {
   bin(c, 480, 262, 0, true);
   for (const [lx, lz, lr] of [[360, 262, 0], [440, 262, 0], [500, 262, 0], [580, 262, 0], [360, 378, Math.PI], [440, 378, Math.PI], [520, 378, Math.PI], [640, 262, 0], [640, 360, Math.PI]])
     standLamp(lx, lz, lr);
-  for (const [fx0, fz0, fx1, fz1] of [[330, 420, 602, 420], [638, 420, 700, 420], [700, 190, 700, 420], [640, 380, 700, 380], [330, 385, 330, 420]]) fenceLine(c, fx0, fz0, fx1, fz1, 'chain');
-  fenceLine(c, 625, 255, 625, 372, 'chain');
+  // The Amasya-Tokat corridor leaves the map east through this industrial yard,
+  // so its fences open into a real gate instead of crossing the carriageway.
+  for (const [fx0, fz0, fx1, fz1] of [[330, 420, 602, 420], [638, 420, 700, 420], [700, 190, 700, 376], [700, 404, 700, 420], [644, 400, 700, 400], [330, 385, 330, 420]]) fenceLine(c, fx0, fz0, fx1, fz1, 'chain');
+  fenceLine(c, 625, 255, 625, 358, 'chain');
+  // industrial-zone exit gate on the corridor
+  for (const gz of [376, 404]) {
+    B.box(1.0, 5.6, 1.0, M.concrete, 700, 0, gz, 0xd8d2c4);
+    B.box(1.1, 0.5, 1.1, M.paint, 700, 5.7, gz, 0xc5342d);
+    col.addCircle(700, gz, 0.7, 'gate');
+  }
+  B.box(0.7, 0.55, 29, M.metal, 700, 6.0, 390, 0x8f979c);
+  nameBoard(700, 6.9, 390, Math.PI / 2, tr.osbSign, 12, 1.9);
+  for (const [bx, bz, bry, btext, bw] of [[700, 383, -Math.PI / 2, tr.exitSign, 3.4], [704, 399, Math.PI / 2, tr.caution, 2.6]] as [number, number, number, string, number][]) {
+    c.B.push(0, groundHeight(bx, bz), 0);
+    board(c, bx, bz, bry, btext, bw, 1.1, 2.6, 'local');
+    c.B.pop();
+  }
   const forklifts: any[] = [];
   for (const [ax, az, bx, bz] of [[358, 289, 385, 289], [508, 302.5, 528, 302.5], [372, 349, 372, 364]]) {
     const f = makeForklift();
@@ -523,6 +546,9 @@ export function buildWorld(): World {
 
   const regional = buildRegionalSettlements(c, root, g, regionalNetwork.corridors);
   const expansion = buildExpansion(c, g);
+  // Roadside services and corridor villages — built from the same graph the
+  // traffic and the GPS use, so every sign points at something drivable.
+  const roadside = buildRoadside(c, g);
 
   /* ================================= SCATTER ================================= */
   const forests: number[][] = [[-215, -460, 5, -345], [-120, -300, -20, -262]];
@@ -588,19 +614,20 @@ export function buildWorld(): World {
   fenceLine(c, -372, 238, -372, 192, 'chain'); fenceLine(c, -428, 238, -372, 238, 'chain');
 
   localizeCoreLocations(locations);
-  Object.assign(locations, regional.locations, expansion.locations); pumps.push(...regional.pumps, ...expansion.pumps);
+  Object.assign(locations, regional.locations, expansion.locations, roadside.locations);
+  pumps.push(...regional.pumps, ...expansion.pumps, ...roadside.pumps);
   const services: ServiceLocation[] = [
     { id: 'amasya.fuel', provinceId: 'amasya', name: tr.fuelName, kind: 'fuel', x: -200, z: 95, r: 40 },
     { id: 'amasya.garage', provinceId: 'amasya', name: tr.garageName, kind: 'garage', x: -251, z: 167, r: 12 },
-    { id: 'amasya.rest', provinceId: 'amasya', name: tr.restName, kind: 'rest', x: 220, z: 40, r: 50 }, ...regional.services, ...expansion.services,
+    { id: 'amasya.rest', provinceId: 'amasya', name: tr.restName, kind: 'rest', x: 220, z: 40, r: 50 }, ...regional.services, ...expansion.services, ...roadside.services,
   ];
   const pois: Poi[] = [
-    { id: 'town', name: tr.amasya, x: -430, z: 0, r: 180 }, { id: 'village', name: tr.villageName, x: 470, z: -300, r: 90 },
+    { id: 'town', name: tr.amasya, x: -430, z: 0, r: 180 }, { id: 'amasya', name: tr.amasya, x: -430, z: 0, r: 180 }, { id: 'village', name: tr.villageName, x: 470, z: -300, r: 90 },
     { id: 'industrial', name: tr.industrialArea, x: 480, z: 310, r: 130 }, { id: 'fuel', name: tr.fuelName, x: -200, z: 95, r: 45 },
     { id: 'garage', name: tr.garageName, x: -260, z: 167, r: 35 }, { id: 'rest', name: tr.restName, x: 220, z: 40, r: 50 },
     { id: 'bridge', name: tr.bridgeName, x: 70, z: 0, r: 55 }, { id: 'forest', name: tr.forestName, x: -110, z: -400, r: 90 },
     { id: 'farm', name: tr.farmArea, x: 270, z: -190, r: 70 }, { id: 'hub', name: tr.junctionName, x: -240, z: 0, r: 40 },
-    { id: 'mill', name: tr.millBridge, x: 56, z: -320, r: 40 }, { id: 'south', name: tr.southBridge, x: 80, z: 350, r: 40 }, ...regional.pois, ...expansion.pois,
+    { id: 'mill', name: tr.millBridge, x: 56, z: -320, r: 40 }, { id: 'south', name: tr.southBridge, x: 80, z: 350, r: 40 }, ...regional.pois, ...expansion.pois, ...roadside.pois,
   ];
 
   /* -------------------------------- finalize -------------------------------- */

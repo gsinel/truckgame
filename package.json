@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "probe": "node tools/probe.mjs http://127.0.0.1:5173/ --drive=8",
+    "shots": "node tools/shots.mjs",
+    "setup:chromium": "node tools/setup-chromium.mjs"
   },
   "dependencies": {
     "@types/three": "^0.186.0",
@@ -17,11 +20,13 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "puppeteer": "^25.12.0",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.3.2",

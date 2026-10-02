@@ -6,7 +6,11 @@ import { tr, upper } from '../game/i18n';
 import { groundHeight } from '../game/elevation';
 import { VILLAGES } from '../game/regions';
 
-const S = 0.26, X0 = WORLD.x0, Z0 = WORLD.z0, W = Math.round((WORLD.x1 - X0) * S), H = Math.round((WORLD.z1 - Z0) * S);
+// One cached schematic of the whole playable area. The world spans ~24 km, so the
+// canvas is capped instead of drawn at a fixed metres-per-pixel rate.
+const SPAN = Math.max(WORLD.x1 - WORLD.x0, WORLD.z1 - WORLD.z0);
+const S = Math.min(0.26, 3072 / SPAN);
+const X0 = WORLD.x0, Z0 = WORLD.z0, W = Math.round((WORLD.x1 - X0) * S), H = Math.round((WORLD.z1 - Z0) * S);
 const P = (x: number, z: number): [number, number] => [(x - X0) * S, (z - Z0) * S];
 
 let bg: HTMLCanvasElement | null = null;
@@ -85,7 +89,7 @@ function buildBg() {
   g.font = 'bold 14px monospace';
   for (const c of extraCities) label(upper(c.displayName), c.x, c.z - 140, '#fff0c8');
   g.font = '10px monospace';
-  const labelled = ['village', 'forest', 'farm', 'industrial', 'amasya.riverfront', ...w.villages.map(v => v.id)];
+  const labelled = ['village', 'forest', 'farm', 'industrial', 'amasya.riverfront', ...VILLAGES.map(v => v.id)];
   for (const p of w.pois.filter(p => labelled.includes(p.id))) label(upper(p.name), p.x, p.z - 8, '#d4dcc8');
   for (const l of Object.values(w.locations)) {
     const [x, z] = P(l.x, l.z);
