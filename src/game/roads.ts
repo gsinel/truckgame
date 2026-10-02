@@ -30,6 +30,8 @@ export interface RNode {
 export interface REdge {
   id: number; a: RNode; b: RNode; pts: { x: number; z: number }[]; cum: number[]; len: number;
   type: RoadType; w: number; oneWay: boolean; bridge: boolean;
+  /** Sampling distance of `pts` — renderers use it to scale their own segment length. */
+  step?: number;
   key?: string; routeCode?: string; provinceIds?: string[];
 }
 export interface Pt { x: number; z: number; dx: number; dz: number }
@@ -99,18 +101,46 @@ function catmull(P: number[][], step = 1.2): { x: number; z: number }[] {
 export class RoadGraph {
   nodes: RNode[] = [];
   edges: REdge[] = [];
+  /** Segment index: 40 m cells -> (edge, segment) pairs, so nearest() never scans the whole graph. */
+  private seg = new Map<number, { e: REdge; i: number }[]>();
+  private static SEG_CELL = 40;
+  private static segKey(ix: number, iz: number) { return (ix + 8192) * 32768 + (iz + 8192); }
+  private indexSegments() {
+    this.seg.clear();
+    for (const e of this.edges) {
+      for (let i = 0; i < e.pts.length - 1; i++) {
+        const p = e.pts[i], q = e.pts[i + 1];
+        const x0 = Math.floor(Math.min(p.x, q.x) / RoadGraph.SEG_CELL), x1 = Math.floor(Math.max(p.x, q.x) / RoadGraph.SEG_CELL);
+        const z0 = Math.floor(Math.min(p.z, q.z) / RoadGraph.SEG_CELL), z1 = Math.floor(Math.max(p.z, q.z) / RoadGraph.SEG_CELL);
+        for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) {
+          const k = RoadGraph.segKey(ix, iz);
+          let a = this.seg.get(k);
+          if (!a) this.seg.set(k, (a = []));
+          a.push({ e, i });
+        }
+      }
+    }
+  }
   node(x: number, z: number, name?: string): RNode {
     const n: RNode = { id: this.nodes.length, x, z, edges: [], R: 0, light: false, ring: false, name };
     this.nodes.push(n);
     return n;
   }
-  connect(a: RNode, b: RNode, type: RoadType, mids: number[][] = [], opts: { oneWay?: boolean; pts?: { x: number; z: number }[]; bridge?: boolean } = {}) {
+  /**
+   * `mids` are Catmull-Rom controls. `opts.step` is the sampling distance: the core
+   * keeps the original 1.2 m (it is dense, hand-authored geometry), while the long
+   * intercity corridors are sampled every few metres — chords stay far below a tyre
+   * width on their curve radii, and the mesh stays a fraction of the size.
+   */
+  connect(a: RNode, b: RNode, type: RoadType, mids: number[][] = [],
+    opts: { oneWay?: boolean; pts?: { x: number; z: number }[]; bridge?: boolean; step?: number } = {}) {
+    const step = opts.step ?? 1.2;
     let pts = opts.pts;
-    if (!pts) pts = mids.length ? catmull([[a.x, a.z], ...mids, [b.x, b.z]], 1.2) : [{ x: a.x, z: a.z }, { x: b.x, z: b.z }];
+    if (!pts) pts = mids.length ? catmull([[a.x, a.z], ...mids, [b.x, b.z]], step) : [{ x: a.x, z: a.z }, { x: b.x, z: b.z }];
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
     const e: REdge = {
-      id: this.edges.length, a, b, pts, cum, len: cum[cum.length - 1], type, w: SPEC[type].w,
+      id: this.edges.length, a, b, pts, cum, len: cum[cum.length - 1], type, w: SPEC[type].w, step,
       oneWay: !!opts.oneWay || type === 'ring', bridge: !!opts.bridge,
     };
     this.edges.push(e);
@@ -119,6 +149,7 @@ export class RoadGraph {
     return e;
   }
   finalize() {
+    this.indexSegments();
     for (const n of this.nodes) {
       if (n.edges.length >= 3) {
         let maxR = Math.max(...n.edges.map((e) => e.w / 2)) + 1.2;
@@ -174,18 +205,41 @@ export class RoadGraph {
     dx /= l; dz /= l;
     return { x: p.x, z: p.z, dx, dz, rx: -dz, rz: dx };
   }
+  /** Closest point on the network. Grid-accelerated: the corridor graph is far too large to scan. */
   nearest(x: number, z: number) {
+    const cell = RoadGraph.SEG_CELL;
+    const cx = Math.floor(x / cell), cz = Math.floor(z / cell);
     let best = { e: this.edges[0], s: 0, d: 1e9 };
-    for (const e of this.edges) {
-      for (let i = 0; i < e.pts.length - 1; i++) {
-        const p = e.pts[i], q = e.pts[i + 1];
-        const vx = q.x - p.x, vz = q.z - p.z;
-        const l2 = vx * vx + vz * vz || 1;
-        let t = ((x - p.x) * vx + (z - p.z) * vz) / l2;
-        t = Math.max(0, Math.min(1, t));
-        const d = Math.hypot(p.x + vx * t - x, p.z + vz * t - z);
-        if (d < best.d) best = { e, s: e.cum[i] + t * Math.sqrt(l2), d };
+    const test = (e: REdge, i: number) => {
+      const p = e.pts[i], q = e.pts[i + 1];
+      const vx = q.x - p.x, vz = q.z - p.z;
+      const l2 = vx * vx + vz * vz || 1;
+      let t = ((x - p.x) * vx + (z - p.z) * vz) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(p.x + vx * t - x, p.z + vz * t - z);
+      if (d < best.d) best = { e, s: e.cum[i] + t * Math.sqrt(l2), d };
+    };
+    for (let ring = 0; ring <= 12; ring++) {
+      let found = false;
+      for (let ix = cx - ring; ix <= cx + ring; ix++) for (let iz = cz - ring; iz <= cz + ring; iz++) {
+        if (ring > 0 && Math.max(Math.abs(ix - cx), Math.abs(iz - cz)) !== ring) continue;
+        const arr = this.seg.get(RoadGraph.segKey(ix, iz));
+        if (!arr) continue;
+        found = true;
+        for (const s of arr) test(s.e, s.i);
       }
+      // Anything outside the scanned ring is at least `ring * cell` away.
+      if (found && best.d <= ring * cell) return best;
+      if (ring === 12) break;
+    }
+    // Off-network query (scenery placement, recovery): prune by edge bounding box.
+    for (const e of this.edges) {
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const p of e.pts) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z; }
+      const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+      const dz = z < z0 ? z0 - z : z > z1 ? z - z1 : 0;
+      if (Math.hypot(dx, dz) >= best.d) continue;
+      for (let i = 0; i < e.pts.length - 1; i++) test(e, i);
     }
     return best;
   }
@@ -228,7 +282,9 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
       s0 = Math.max(s0, range.start); s1 = Math.min(s1, range.end);
     }
     if (s1 - s0 < 0.05) return;
-    if (e.pts.length > 2) step = Math.min(step, 1.2);
+    // Follow the edge's own sampling: corridor polylines are metres apart, the core
+    // grid is 1.2 m. Sampling markings below the source resolution only burns triangles.
+    if (e.pts.length > 2) step = Math.min(step, Math.max(1.2, e.step ?? 1.2));
     const n = Math.max(1, Math.ceil((s1 - s0) / step));
     let prev = g.station(e, s0);
     for (let i = 1; i <= n; i++) {
@@ -361,10 +417,15 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
           }
         }
       }
-      // central lamps
-      for (let s = tA + 20; s < L - tB - 10 && !e.bridge; s += 64) {
-        const st = g.station(e, s);
-        lamp(st.x, st.z, st.rx, st.rz, true);
+      // Central lamps light the city approaches; out on the open corridor they would
+      // be fiction (and hundreds of poles), so only the ends of a long edge get them.
+      if (!e.bridge) {
+        const reach = L > 1400 ? 520 : L;
+        for (let s = tA + 20; s < L - tB - 10; s += 64) {
+          if (s > reach && s < L - reach) continue;
+          const st = g.station(e, s);
+          lamp(st.x, st.z, st.rx, st.rz, true);
+        }
       }
     }
     /* street lamps */

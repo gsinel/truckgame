@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { M, extra, rnd, rr, pick } from './textures';
 import { Ctx, tree } from './props';
 import { groundHeight, riverCenter } from './elevation';
-import { WORLD_BOUNDS } from './regions';
+import { WORLD_BOUNDS, PLATEAU_BRIDGE } from './regions';
 import { registerLOD } from './batch';
 import { tr } from './i18n';
 
@@ -13,7 +13,8 @@ export const BRIDGES = [
   { z: 0, w: 15, deck: 20, name: tr.bridgeName },
   { z: -320, w: 7.4, deck: 10.4, name: tr.millBridge },
   { z: 350, w: 7.4, deck: 10.4, name: tr.southBridge },
-  { z: 1620, w: 7.4, deck: 10.4, name: tr.plateauBridge },
+  // D.200 crossing on the Yozgat–Sivas plateau run: the deck is centred on the river.
+  { z: PLATEAU_BRIDGE.z, w: 7.4, deck: 10.4, name: tr.plateauBridge },
 ];
 export const BRIDGE_HALF_LEN = 32;
 export const WORLD = WORLD_BOUNDS;
@@ -40,13 +41,40 @@ function hAt(u: number) {
   return -3.2;
 }
 
+/**
+ * Variable-resolution terrain grid.
+ *
+ * The Amasya valley (and everything the player reads up close) keeps the original
+ * 12 m sampling; the outlying corridors only ever appear through fog, so their rows
+ * and columns widen to 34 m and then 90 m. Grid vertices stay shared between bands
+ * (the bands are contiguous, never overlapping), so there are no seams, and the
+ * whole map costs roughly what the original 4 km square did.
+ */
+function band(step: number, limit: number, from: number, to: number, out: number[]) {
+  for (let v = Math.max(from, -limit); v <= Math.min(to, limit); v += step) out.push(v);
+}
+function gridAxis(from: number, to: number): number[] {
+  const out: number[] = [];
+  band(12, 900, from, to, out);
+  band(45, 7000, from, to, out);
+  band(130, Math.max(Math.abs(from), Math.abs(to)) + 400, from, to, out);
+  out.sort((a, b) => a - b);
+  return [...new Set(out.map(v => Math.round(v * 100) / 100))];
+}
+
+/** Dry steppe ground: the İç Anadolu plateau and its noise-driven fringe. */
+function dryAt(x: number, z: number) {
+  if (z > 900) return true;
+  if (z < 260) return false;
+  return Math.sin(x * 0.0016) * Math.cos(z * 0.0013) + Math.sin(x * 0.0007 + z * 0.0009) > 0.55;
+}
+
 export function buildTerrain(parent: THREE.Object3D) {
   const U: number[] = [];
-  for (let x = WORLD.x0 - 180; x < -32; x += 12) U.push(x);
+  for (const x of gridAxis(WORLD.x0 - 180, -34)) U.push(x);
   U.push(-32, -24, -18, -14, -11.4, -11, -10.5, -9, -6, 6, 9, 10.5, 11, 11.4, 14, 18, 24, 32);
-  for (let x = 44; x <= WORLD.x1 + 100; x += 12) U.push(x);
-  const rows: number[] = [];
-  for (let z = WORLD.z0 - 40; z <= WORLD.z1 + 40; z += 12) rows.push(z);
+  for (const x of gridAxis(44, WORLD.x1 + 120)) U.push(x);
+  const rows = gridAxis(WORLD.z0 - 60, WORLD.z1 + 120);
   const nu = U.length, nz = rows.length;
   const pos = new Float32Array(nu * nz * 3), uv = new Float32Array(nu * nz * 2), col = new Float32Array(nu * nz * 3);
   const c = new THREE.Color();
@@ -59,8 +87,8 @@ export function buildTerrain(parent: THREE.Object3D) {
       const n = Math.sin(x * 0.011) * Math.cos(z * 0.013) + Math.sin(x * 0.037 + z * 0.021) * 0.5;
       const bank = Math.abs(U[i]) < 11.5;
       if (bank) c.setRGB(0.5, 0.42, 0.34);
+      else if (dryAt(x, z)) c.setRGB(1.02 + n * 0.06, 0.99 + n * 0.05, 0.94 + n * 0.05);
       else c.setRGB(0.86 + n * 0.1, 1.0 + n * 0.08, 0.82 + n * 0.1);
-      if (z > 850 && !bank) c.setRGB(1.12 + n * 0.07, 0.98 + n * 0.06, 0.66);
       col.set([c.r, c.g, c.b], k * 3);
     }
   // Shared border samples, small independently culled terrain chunks.
@@ -78,7 +106,10 @@ export function buildTerrain(parent: THREE.Object3D) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(cu, 2));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(cc, 3));
     geo.setIndex(indices); geo.computeVertexNormals(); geo.computeBoundingSphere();
-    const mesh = new THREE.Mesh(geo, M.grass);
+    // Plateau corridors read as steppe, the Yeşilırmak valley stays green, and a
+    // little patchwork noise keeps the transition from being a hard line.
+    const km = (j0 + j1) >> 1, im = (i0 + i1) >> 1;
+    const mesh = new THREE.Mesh(geo, dryAt(pos[(km * nu + im) * 3], pos[(km * nu + im) * 3 + 2]) ? M.grassDry : M.grass);
     mesh.receiveShadow = true; parent.add(mesh);
     const center = geo.boundingSphere!.center;
     registerLOD(mesh, center.x, center.z, 1900);

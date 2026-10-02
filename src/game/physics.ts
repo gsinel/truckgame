@@ -198,8 +198,9 @@ export class TruckSim {
 
     /* ---------- fuel ---------- */
     if (this.engineOn && this.fuel > 0) {
-      // Phase 1 gameplay consumption is retained; the compressed map is not a real fuel-economy test.
-      const used = (0.0008 + (0.0035 + 0.006 * this.throttle) * Math.abs(vf2)) * dt;
+      // Calibrated against the real road distances this world uses: idling burns a
+      // trickle, and a loaded 40 t tractor-trailer sits around 40-46 L/100 km.
+      const used = (0.0002 + (0.0003 + 0.00022 * this.throttle) * Math.abs(vf2)) * dt;
       this.fuel = Math.max(0, this.fuel - used);
     }
     const fr = this.fuel / this.fuelCap;

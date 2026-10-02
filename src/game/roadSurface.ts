@@ -63,7 +63,10 @@ export function buildRoadSurface(g: RoadGraph, batch: Batcher): Map<number, Road
   for (const e of g.edges) {
     const start = cut(e, e.a), end = e.len - cut(e, e.b);
     ranges.set(e.id, { start, end });
-    const count = Math.max(1, Math.ceil((end - start) / (e.pts.length > 2 ? 1.25 : 3)));
+    // Two source samples per quad: the core keeps its 2.5 m quads, the corridors get
+    // quads that match their own polyline resolution instead of 1.25 m slivers.
+    const quadLen = Math.max(1.25, Math.min(9, (e.step ?? 1.2) * 2));
+    const count = Math.max(1, Math.ceil((end - start) / quadLen));
     for (let i = 0; i < count; i++) {
       const sa = start + (end - start) * i / count, sb = start + (end - start) * (i + 1) / count;
       const wa = roadHalfWidth(e, sa), wb = roadHalfWidth(e, sb);

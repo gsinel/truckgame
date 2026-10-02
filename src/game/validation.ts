@@ -8,6 +8,7 @@ import { evaluateParking } from './missions';
 import { groundHeight } from './elevation';
 import { GAME_EVENT_TYPES } from './events';
 import { tr, money } from './i18n';
+import { EXPANSION, CITY_GRID } from './regionAmasyaWest';
 
 export interface ValidationCheck { name: string; passed: boolean; detail: string }
 
@@ -18,6 +19,7 @@ export function validatePhase2(world: World, jobs: Job[]) {
   const g = world.graph;
   const missingCities = PROVINCES.filter(p => !world.cities.some(c => c.id === `${p.id}.center` && c.provinceId === p.id)
     || !world.pois.some(poi => poi.id === p.id));
+  const missingCityDetail = missingCities.map(p => (world.cities.some(c => c.id === `${p.id}.center`) ? `${p.id}:no-discovery-region` : `${p.id}:no-city-record`));
   const requiredLocations = [...new Set(CONTRACTS.flatMap(j => [j.from, j.to]))];
   const missingLocations = requiredLocations.filter(id => !world.locations[id]);
   const missingRoadConnections = PROVINCES.flatMap(p => p.connectedRoads
@@ -49,7 +51,8 @@ export function validatePhase2(world: World, jobs: Job[]) {
   check('Spline endpoints', endsValid, 'Rendered road source endpoints match routing nodes within 1 mm');
   check('Region facilities', missingReferences.length === 0,
     `${PROVINCES.length} regions; ${world.services.length} services; ${missingReferences.length} missing references`);
-  check('Cities physically registered', missingCities.length === 0, `${world.cities.length} city records, ${world.pois.length} discovery regions`);
+  check('Cities physically registered', missingCities.length === 0,
+    `${world.cities.length} city records, ${world.pois.length} discovery regions${missingCityDetail.length ? `; missing ${missingCityDetail.join(', ')}` : ''}`);
   check('Province road connections', missingRoadConnections.length === 0, `${g.edges.length} road segments; ${missingRoadConnections.length} declared corridor IDs missing`);
   check('Contracts reference built sites', CONTRACTS.every(j => world.locations[j.from] && world.locations[j.to])
     && jobs.every(j => j.km > 0 && j.reward > 0), `${jobs.length} offers with calculated road distances`);
@@ -105,19 +108,27 @@ export function validatePhase2(world: World, jobs: Job[]) {
   const invalidSurface = g.edges.some(e => e.pts.some(p => !Number.isFinite(groundHeight(p.x, p.z))));
   check('Elevation field', !invalidSurface && groundHeight(world.spawn.x, world.spawn.z) === 0, 'Finite heights, original depot still at its tested elevation');
 
-  const obstructions: { road: string; x: number; z: number; tag?: string }[] = [];
+  const obstructions: { road: string; s: number; x: number; z: number; tag?: string; col: string }[] = [];
   for (const e of g.edges.filter(e => e.key && !e.key.includes('.street.'))) {
     for (let s = Math.min(25, e.len / 3); s < e.len - 15; s += 12) {
       const p = g.station(e, s), lane = e.type === 'highway' ? 5.25 : 1.85;
       for (const dir of [-1, 1]) {
         const x = p.x + p.rx * lane * dir, z = p.z + p.rz * lane * dir;
         world.col.query(x, z, 1.25, hit => {
-          if (hit.pen > 0.08 && obstructions.length < 30) obstructions.push({ road: e.key!, x, z, tag: hit.c.tag });
+          if (hit.pen > 0.08 && obstructions.length < 30) {
+            const c = hit.c;
+            obstructions.push({
+              road: e.key!, s, x, z, tag: c.tag,
+              col: `${c.t ? 'circle' : 'box'}(${Math.round(c.cx)},${Math.round(c.cz)} ${c.t ? 'r' : 'hw/hd'}=${c.t ? c.r.toFixed(1) : `${c.hw.toFixed(1)}/${c.hd.toFixed(1)}`}${c.tag ? '' : ' notag'})`,
+            });
+          }
         });
       }
     }
   }
-  check('Regional lane clearance samples', obstructions.length === 0, `${obstructions.length} static collider overlaps in sampled lane corridors`);
+  check('Regional lane clearance samples', obstructions.length === 0,
+    `${obstructions.length} static collider overlaps in sampled lane corridors${obstructions.length
+      ? '; ' + obstructions.slice(0, 12).map(o => `${o.tag}@${o.road}(s=${Math.round(o.s)} ${Math.round(o.x)},${Math.round(o.z)}) ${o.col}`).join(' ') : ''}`);
   const REQUIRED_TEXT_KEYS = [
     'start', 'jobs', 'dispatch', 'accept', 'cancel', 'cargo', 'origin', 'destination', 'distance', 'reward',
     'fuel', 'damage', 'repair', 'refuel', 'parking', 'completed', 'continue', 'amasya', 'tokat', 'corum',

@@ -22,7 +22,8 @@ const wrap = (a: number) => {
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
 };
-const FUEL_PRICE = 1.72;
+/** Turkish pump price per litre (game economy keeps its original job payouts). */
+const FUEL_PRICE = 46.9;
 const REPAIR_PER_PT = 22;
 /** cab camera limits: eye height offset (m) and head turn (rad) */
 const CAM_RISE_MIN = -0.10, CAM_RISE_MAX = 0.28;
@@ -180,6 +181,7 @@ export class Game {
     ui.loading = false;
     ui.region = text.depotName;
     (window as any).__game = this;
+    (window as any).__ui = ui; // diagnostics: same object the HUD renders
     notify();
     this.lastT = performance.now();
     requestAnimationFrame((t) => this.frame(t));

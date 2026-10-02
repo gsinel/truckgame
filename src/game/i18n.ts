@@ -74,6 +74,7 @@ export const tr = {
   millBridge: 'Taşova Köprüsü', southBridge: 'Güney Çevre Yolu Köprüsü', plateauBridge: 'Bozok Köprüsü',
   stop: 'DUR', yield: 'YOL VER', caution: 'DİKKAT', cityCenter: 'ŞEHİR MERKEZİ', entry: 'GİRİŞ', exitSign: 'ÇIKIŞ',
   restSign: 'DİNLENME TESİSİ', depotSign: 'AMASYA|NAKLİYE DEPOSU', welcomeSign: 'AMASYA|HOŞ GELDİNİZ',
+  osbSign: 'AMASYA|ORGANİZE SANAYİ BÖLGESİ',
   citySign: 'AMASYA|ŞEHİR MERKEZİ', warehouseSign: 'AMASYA|LOJİSTİK', factorySign: 'AMASYA|SANAYİ',
   villageSign: 'YEŞİLÖZ', coopSign: 'TARIM|KOOPERATİFİ', farmSign: 'ELMA|BAHÇELERİ', marketSign: 'AMASYA|TOPTANCI HALİ',
   serviceSign: 'AĞIR VASITA|SERVİSİ', fuelSign: 'VADİ|AKARYAKIT', restBoard: 'VADİ|DİNLENME TESİSİ',
@@ -82,6 +83,9 @@ export const tr = {
   shopBakery: 'TAŞ FIRIN', shopMarket: 'BEREKET MARKET', shopCafe: 'VADİ ÇAY EVİ', shopHardware: 'YAPI MALZEMELERİ',
   shopTire: 'LASTİKÇİ', shopFood: 'EV YEMEKLERİ', busStop: 'DURAK', busDestination: 'ŞEHİR MERKEZİ', minibus: 'DOLMUŞ',
   diesel: 'MOTORİN', stationShop: 'MARKET', parkingSign: 'TIR PARKI', construction: 'İNŞAAT ALANI',
+  weighing: 'KANTAR', truckWash: 'TIR YIKAMA', dieselPrice: 'MOTORİN', tireService: 'LASTİK', towTruck: 'ÇEKİCİ',
+  open24: '24 SAAT AÇIK', villageEntry: 'KÖYÜ', villageCoop: 'TARIM KREDİ', villageSchoolSign: 'İLKOKUL', mosque: 'CAMİ',
+  toilet: 'WC', prayerRoom: 'MESCİT', villageSchool: 'İLKOKUL', restFacility: 'YOL ÜSTÜ|LOKANTASI',
   cargoMachinery: 'Sanayi Makineleri', cargoCnc: 'CNC işleme makineleri', cargoGoods: 'Paketli Gıda', cargoFood: 'Ambalajlı gıda kolileri',
   cargoSteel: 'Metal Ürünleri', cargoFittings: 'Paletli çelik bağlantılar', cargoProduce: 'Tarım Ürünleri', cargoApples: 'Amasya elması',
   cargoPress: 'Fabrika Ekipmanı', cargoHydraulic: 'Hidrolik pres üniteleri', cargoTextile: 'Tekstil', cargoFabric: 'Kumaş ve ev tekstili',
@@ -94,6 +98,20 @@ export const tr = {
   jobSamsun: 'Amasya elmasını Samsun dağıtım merkezine ulaştır.', jobCorum: 'Çorum atölyelerinden Amasya deposuna yedek parçalar.',
   jobSivas: 'Sivas sanayisinin metal sevkiyatını Amasya’ya getir.', jobYozgat: 'Yozgat tahılını Tokat bölgesine taşı.',
   jobTextile: 'Samsun’dan Çorum’a paketlenmiş tekstil ürünleri.', jobBuilding: 'Tokat’tan Sivas’a yeni yapı malzemeleri.',
+  /* --- regional expansion: corridor settlements, sites, stops and jobs --- */
+  villageKirikvadi: 'Kırıkvadi Köyü', villageBayat: 'Bayat Köyü', villageGokdere: 'Gökdere Köyü', villageSorgun: 'Sorgun Kasabası',
+  samsunPort: 'Samsun Limanı', corumFood: 'Çorum Gıda Fabrikası', tokatTextile: 'Tokat Tekstil Fabrikası',
+  sivasCement: 'Yıldızeli Çimento Fabrikası', merzifonCastle: 'Merzifon Kalesi', suluovaSugar: 'Suluova Şeker Fabrikası',
+  corumGate: 'Hattuşa Aslanlı Kapı', tokatCastle: 'Tokat Kalesi', samsunLighthouse: 'Samsun Feneri',
+  sivasStation: 'Sivas Garı', yozgatClock: 'Yozgat Saat Kulesi', gumushBridge: 'Gümüşhacıköy Taş Köprüsü',
+  roadSamsun: 'Samsun Yolu', roadTokat: 'Tokat Yolu', roadCorum: 'Çorum Yolu', roadYozgat: 'Yozgat Yolu', roadSivas: 'Sivas Yolu',
+  stopKirikvadi: 'Kırıkvadi Dinlenme Tesisleri', stopHavza: 'Havza Akaryakıt', stopGokdere: 'Gökdere Tesisleri',
+  stopBayat: 'Bayat Akaryakıt', stopMecitozu: 'Mecitözü Dinlenme Tesisi', stopSorgun: 'Sorgun Tesisleri',
+  stopYildizeli: 'Yıldızeli Dinlenme Tesisi', stopSivasServis: 'Sivas Ağır Vasıta Servisi',
+  jobCement: 'Yıldızeli çimento fabrikasından Amasya deposuna torbalı çimento.', jobTextilePort: 'Tokat tekstilini limandan ihracata yetiştir.',
+  jobFoodTokat: 'Çorum gıda fabrikasından Tokat lojistiğine koliler.', jobContainer: 'Limandan indirilen konteynerleri Çorum fabrikasına taşı.',
+  jobGrainPort: 'Yozgat buğdayını Samsun limanına ulaştır.', jobMachineSivas: 'Çorum makine fabrikasından Sivas sanayisine tezgâh.',
+  landmarkArrow: 'TARİHİ YAPI', roadStop: 'TESİS', restArea: 'DİNLENME ALANI',
 } as const;
 
 export type TextKey = keyof typeof tr;

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { RoadGraph, RNode, REdge } from './roads';
-import { PROVINCES, REGIONAL_ROADS, REGIONAL_SITE_NAMES, CORE_NAMES, Province } from './regions';
+import { PROVINCES, REGIONAL_ROADS, REGIONAL_SITE_NAMES, CORE_NAMES, Province, PLATEAU_BRIDGE } from './regions';
 import { groundHeight } from './elevation';
+import { buildCityLandmark } from './landmarks';
 import { tr, upper } from './i18n';
 import { M, extra, labelMaterial } from './textures';
 import { Ctx, apartment, shop, warehouse, house, bin, bench, picnic, pallet, containerStack, barrels, parkedCar, silo, busStop, tree, fenceLine } from './props';
@@ -31,13 +32,15 @@ export function extendRegionalNetwork(g: RoadGraph, anchors: Record<string, RNod
     }
     nodes.center.light = true;
   }
-  ports['plateau.bridgeWest'] = g.node(-10, 1620, 'plateau.bridgeWest');
-  ports['plateau.bridgeEast'] = g.node(150, 1620, 'plateau.bridgeEast');
-  const bridge = g.connect(ports['plateau.bridgeWest'], ports['plateau.bridgeEast'], 'rural', [], { bridge: true });
+  ports['plateau.bridgeWest'] = g.node(PLATEAU_BRIDGE.west.x, PLATEAU_BRIDGE.west.z, 'plateau.bridgeWest');
+  ports['plateau.bridgeEast'] = g.node(PLATEAU_BRIDGE.east.x, PLATEAU_BRIDGE.east.z, 'plateau.bridgeEast');
+  const bridge = g.connect(ports['plateau.bridgeWest'], ports['plateau.bridgeEast'], 'rural', [], { bridge: true, step: 4 });
   bridge.key = 'yozgat-sivas.bridge'; bridge.routeCode = 'D.200'; bridge.provinceIds = ['yozgat', 'sivas'];
   const corridors: REdge[] = [];
   for (const r of REGIONAL_ROADS) {
-    const e = g.connect(ports[r.from], ports[r.to], r.type, r.via);
+    const a = ports[r.from], b = ports[r.to];
+    const step = Math.hypot(b.x - a.x, b.z - a.z) > 2200 ? 5 : 1.8;
+    const e = g.connect(a, b, r.type, r.via, { step });
     e.key = r.id; e.routeCode = r.routeCode;
     e.provinceIds = r.id.startsWith('yozgat-sivas') ? ['yozgat', 'sivas'] : [r.from.split('.')[0], r.to.split('.')[0]];
     corridors.push(e);
@@ -77,7 +80,8 @@ export function buildRegionalSettlements(c: Ctx, root: THREE.Group, g: RoadGraph
     c.B.plane(222, 222, M.pavement, x, 0.018, z, p.environment === 'plateau' ? 0xc4b594 : 0xb8b9b1, { tu: 4 });
     c.B.plane(90, 96, M.slab, x + 57, 0.035, z - 55, 0xbbb8ae, { tu: 4 });
     warehouse(c, x + 55, z - 84, 0, 70, 24, 8.5, p.id === 'tokat' ? 0xc4ad92 : p.id === 'samsun' ? 0x819faa : 0x9da1a6, 3);
-    const id = p.cargoOrigins[0];
+    const siteIds = [...new Set([...p.cargoOrigins, ...p.cargoDestinations])];
+    const id = siteIds[0];
     const loc: Location = { id, name: REGIONAL_SITE_NAMES[id], short: p.displayName, x: x + 52, z: z - 48,
       heading: Math.PI / 2, stack: { x: x + 52, z: z - 64 }, kind: 'industrial', provinceId: p.id,
       cityId: `${p.id}.center`, districtId: `${p.id}.merkez`, industry: p.industries[0] };
@@ -87,6 +91,29 @@ export function buildRegionalSettlements(c: Ctx, root: THREE.Group, g: RoadGraph
     containerStack(c, x + 90, z - 38, 0, 1, 2); bin(c, x + 89, z - 63, 0, true);
     barrels(c, x + 23, z - 85, 3); light(c, x + 18, z - 23); light(c, x + 96, z - 92);
     flagPole(c, x + 91, z - 12, 11);
+    // A second declared site (e.g. tokat.textile, corum.food) is its own yard in the
+    // south-east block, so every contract endpoint is a real, drivable facility.
+    const second = siteIds[1];
+    if (second) {
+      // Second declared facility (tokat.textile, corum.food, samsun.port,
+      // sivas.cement): its own yard inside the same industrial district, south of
+      // the main hall and reachable straight off the city street at z.
+      const sx = x + 52, sz = z - 25;
+      c.B.plane(66, 30, M.slab, sx, 0.036, sz, 0xb7b4aa, { tu: 4 });
+      warehouse(c, sx, sz - 9, 0, 40, 16, 8.4, p.id === 'corum' ? 0xd8cdb2 : p.id === 'sivas' ? 0xb6bcc0 : 0xc7bfae, 3);
+      board(c, sx, sz - 0.2, 0, upper(REGIONAL_SITE_NAMES[second]), 11, 1.25, 6.2);
+      const sloc: Location = { id: second, name: REGIONAL_SITE_NAMES[second], short: p.displayName, x: sx, z: sz + 8,
+        heading: Math.PI, stack: { x: sx, z: sz - 1 }, kind: 'industrial', provinceId: p.id,
+        cityId: `${p.id}.center`, districtId: `${p.id}.merkez`, industry: p.industries[1] ?? p.industries[0] };
+      locations[second] = sloc;
+      loadingMark(c, sloc);
+      for (let i = 0; i < 4; i++) pallet(c, sx + 12 + i * 1.6, sz + 11, 0, i % 3);
+      containerStack(c, sx + 26, sz + 8, 0, 1, 2);
+      barrels(c, sx - 26, sz + 9, 3);
+      bin(c, sx + 30, sz + 11, 0, true);
+      light(c, sx + 28, sz + 12); light(c, sx - 28, sz + 12);
+      fenceLine(c, sx - 33, sz + 13, sx - 14, sz + 13, 'chain');
+    }
     // Dense, varied residential and commercial blocks, leaving the streets unobstructed.
     shop(c, x - 37, z - 24, 0, 22, 12, 3, 0xf1ddba);
     shop(c, x - 79, z - 24, 0, 23, 12, 2, 0xe2ddd0);
@@ -158,11 +185,15 @@ export function buildRegionalSettlements(c: Ctx, root: THREE.Group, g: RoadGraph
       board(c, x + sx, z + sz, ry, `${upper(p.displayName)}|${p.plateCode}`, 4.5, 1.7, 2.4, 'local');
     }
     c.B.pop(); c.D.pop();
+    // City identity: the profile landmark compound (port, castle, clock tower...).
+    buildCityLandmark(c, `${p.id}.center`, x, z, g);
     loadingMark(c, loc);
     pois.push({ id: p.id, name: p.displayName, x, z, r: 240 });
     for (let i = 0; i < 14; i++) {
       const a = i * Math.PI * 2 / 14;
-      tree(c, p.environment === 'plateau' ? 'poplar' : 'oak', x + Math.cos(a) * 160, z + Math.sin(a) * 160, 1.15);
+      const tx = x + Math.cos(a) * 160, tz = z + Math.sin(a) * 160;
+      if (g.nearest(tx, tz).d < 22) continue; // the city belt must not grow over a corridor
+      tree(c, p.environment === 'plateau' ? 'poplar' : 'oak', tx, tz, 1.15);
     }
   }
 
@@ -177,11 +208,13 @@ export function buildRegionalSettlements(c: Ctx, root: THREE.Group, g: RoadGraph
       board(c, x, z, Math.atan2(-p.dx * dir, -p.dz * dir), `${upper(province.displayName)}|${e.routeCode}`, 6, 2, 3.4);
       c.B.pop();
     }
-    for (let s = 80; s < e.len - 80; s += 48) {
+    for (let s = 80; s < e.len - 80; s += 44) {
       const p = g.station(e, s);
       for (const side of [-1, 1]) {
-        const x = p.x + p.rx * side * 28, z = p.z + p.rz * side * 28;
-        if (PROVINCES.some(q => Math.hypot(x - q.x, z - q.z) < 190) || g.nearest(x, z).d < 18) continue;
+        const x = p.x + p.rx * side * 32, z = p.z + p.rz * side * 32;
+        // On the inside of a bend an offset point can land back on the carriageway,
+        // so the planted position is measured against the graph instead of trusted.
+        if (PROVINCES.some(q => Math.hypot(x - q.x, z - q.z) < 190) || g.nearest(x, z).d < 24) continue;
         tree(c, z > 900 ? 'poplar' : 'pine', x, z, 1.25);
       }
     }

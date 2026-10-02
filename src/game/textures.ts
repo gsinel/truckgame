@@ -118,6 +118,15 @@ const grass = () =>
     for (let i = 0; i < 60; i++) px(g, rnd() * w, rnd() * h, 1, 1, rgb(rr(110, 140), rr(160, 185), rr(70, 90)));
     for (let i = 0; i < 4; i++) px(g, rnd() * w, rnd() * h, 1, 1, rgb(240, 230, 120)); // tiny flowers
   });
+// İç Anadolu steppe: the same pixel grass, dried out. Used for the plateau
+// corridors (Sivas/Yozgat) so scenery changes with the region.
+const grassDry = () =>
+  make(64, 64, (g, w, h) => {
+    noiseFill(g, w, h, 150, 138, 88, 14);
+    for (let i = 0; i < 150; i++) px(g, rnd() * w, rnd() * h, 1, 2, rgb(rr(150, 178), rr(132, 158), rr(84, 104)));
+    for (let i = 0; i < 70; i++) px(g, rnd() * w, rnd() * h, 1, 1, rgb(rr(176, 200), rr(164, 186), rr(112, 132)));
+    for (let i = 0; i < 40; i++) px(g, rnd() * w, rnd() * h, 2, 1, rgb(rr(120, 140), rr(108, 126), rr(70, 88)));
+  });
 const dirt = () =>
   make(64, 64, (g, w, h) => {
     noiseFill(g, w, h, 112, 86, 58, 14);
@@ -542,6 +551,7 @@ export function buildMaterials() {
   const po = (f: number) => ({ polygonOffset: true, polygonOffsetFactor: f, polygonOffsetUnits: f });
   sm('grass', grass(), { ...po(4) }, 0.3);
   sm('grassPad', grass(), { ...po(-1) }, 0.3); // grass used ABOVE road (roundabout island, patches)
+  sm('grassDry', grassDry(), { ...po(4) }, 0.3); // plateau corridors: dry steppe grass
   sm('dirt', dirt(), {}, 0.4);
   sm('slab', concrete(), { ...po(1.5) }, 0.8);
   sm('pavement', pavement(), { ...po(1.5) }, 0.7);
