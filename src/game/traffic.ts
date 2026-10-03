@@ -13,7 +13,9 @@ interface TV {
   e: REdge; dir: number; s: number; next: Next | null;
   x: number; z: number; h: number; speed: number;
   laneIdx: number; limitMul: number;
-  crashT: number; blockT: number; ghostT: number;
+  crashT: number; blockT: number;
+  /** overtake manoeuvre: lateral shift (m, to the right of travel) and its timer */
+  swerve: number; swerveT: number; swerveDir: number;
   vx: number; vz: number; mass: number;
   offs: [number, number][]; r: number; halfLen: number;
   body: DynBody;
@@ -48,11 +50,13 @@ export class Traffic {
 
   private spawn(px: number, pz: number, minD: number, maxD: number, initial = false, reuse?: TV) {
     const g = this.g;
-    for (let tries = 0; tries < 30; tries++) {
+    for (let tries = 0; tries < 60; tries++) {
       const e = g.edges[Math.floor(Math.random() * g.edges.length)];
       if (e.len < 30) continue;
       const w = e.type === 'highway' ? 1 : e.type === 'ring' ? 0.2 : 0.6;
-      if (Math.random() > w) continue;
+      // relaxed after the first 20 attempts: the pool must fill to `count`, otherwise
+      // the world quietly ends up with fewer AI drivers than the simulation is sized for
+      if (tries > 20 ? Math.random() > Math.min(1, w * 2.5) : Math.random() > w) continue;
       const dir = e.oneWay ? 1 : Math.random() < 0.5 ? 1 : -1;
       const s = 12 + Math.random() * (e.len - 24);
       const p = g.sample(e, s);
@@ -75,7 +79,7 @@ export class Traffic {
       Object.assign(v, {
         kind, e, dir, s, next: null, speed: 0, laneIdx,
         limitMul: (heavy ? 0.82 : 0.95) * (0.9 + Math.random() * 0.2),
-        crashT: 0, blockT: 0, ghostT: 0, vx: 0, vz: 0,
+        crashT: 0, blockT: 0, swerve: reuse?.swerve ?? 0, swerveT: 0, swerveDir: 1, vx: 0, vz: 0,
         mass: small ? 1500 : heavy ? 10000 : 3000,
         offs: small ? [[1.0, 1.15], [-1.0, 1.15]] : !heavy ? [[1.5, 1.25], [-1.5, 1.25]] : [[3.9, 1.4], [1.3, 1.4], [-1.3, 1.4], [-3.9, 1.4]],
         r: small ? 1.15 : heavy ? 1.4 : 1.25,
@@ -97,6 +101,35 @@ export class Traffic {
   private hit(v: TV, nx: number, nz: number, imp: number) {
     v.crashT = 5 + Math.min(6, imp);
     void nx; void nz;
+  }
+
+  /** is there room alongside to pass, and is nothing coming up the other side? */
+  private roomToPass(v: TV, others: { x: number; z: number; r: number; v?: TV }[]) {
+    const e = v.e;
+    const lane = SPEC[e.type].lanes[Math.min(v.laneIdx, SPEC[e.type].lanes.length - 1)];
+    if (e.w / 2 - (Math.abs(lane) + v.r) < 1.2) return false;
+    const fx = Math.sin(v.h), fz = Math.cos(v.h);
+    for (const o of others) {
+      if (!o.v || o.v === v) continue;
+      const rx = o.x - v.x, rz = o.z - v.z, ahead = rx * fx + rz * fz;
+      const lat = Math.abs(rx * fz - rz * fx);
+      if (ahead > -8 && ahead < 24 && lat < 4.2) return false;
+    }
+    return true;
+  }
+
+  /** which side the blocker is on, so the manoeuvre goes the other way */
+  private blockedSide(v: TV, others: { x: number; z: number; r: number; v?: TV }[]) {
+    const fx = Math.sin(v.h), fz = Math.cos(v.h);
+    let best = 1, bd = 1e9;
+    for (const o of others) {
+      if (o.v === v) continue;
+      const rx = o.x - v.x, rz = o.z - v.z, ahead = rx * fx + rz * fz;
+      if (ahead < 0.5 || ahead > 16) continue;
+      const lat = rx * fz - rz * fx;
+      if (Math.abs(lat) < bd) { bd = Math.abs(lat); best = lat >= 0 ? 1 : -1; }
+    }
+    return best;
   }
 
   /** lateral offset (to the right of travel) for a lane */
@@ -144,7 +177,7 @@ export class Traffic {
       lane = e.oneWay ? 0 : Math.min(lane, SPEC[e.type].lanes.length - 1);
     } else s = s + dir * d;
     const p = g.sample(e, s);
-    const off = this.offset(e, dir, lane);
+    const off = this.offset(e, dir, lane) + v.swerve;
     return { x: p.x + -p.dz * dir * off, z: p.z + p.dx * dir * off };
   }
 
@@ -200,8 +233,7 @@ export class Traffic {
       }
       // obstacles ahead
       let blocked = false;
-      if (v.ghostT > 0) v.ghostT -= dt;
-      else {
+      {
         const look = 7 + v.speed * 2.2;
         for (const o of others) {
           if (o.v === v) continue;
@@ -217,10 +249,29 @@ export class Traffic {
           if (gap < 3) blocked = true;
         }
       }
+      /* A blocked driver used to be made intangible for four seconds, which is precisely
+         the "traffic phases through my truck" artefact. It now behaves like a driver:
+         pull out around the obstruction when the space beside it is free, otherwise take
+         a different road at the next junction, and only reposition when it is genuinely
+         wedged — and a reposition always puts the vehicle out of the player's reach. */
       if (blocked && v.speed < 0.5) {
         v.blockT += dt;
-        if (v.blockT > 7) { v.ghostT = 4; v.blockT = 0; }
+        if (v.blockT > 2.6 && v.swerveT <= 0 && this.roomToPass(v, others)) {
+          v.swerveT = 3.6;
+          v.swerveDir = this.blockedSide(v, others) === 1 ? -1 : 1;
+        } else if (v.blockT > 9) {
+          v.next = this.chooseNext(v); v.blockT = 5;
+        } else if (v.blockT > 18) {
+          v.swerve = 0; v.swerveT = 0; v.blockT = 0;
+          this.respawn(v, px, pz);
+        }
       } else if (!blocked) v.blockT = 0;
+      if (v.swerveT > 0) {
+        v.swerveT -= dt;
+        v.swerve = v.swerveDir * 1.7 * Math.sin(Math.max(0, Math.min(1, 1 - v.swerveT / 3.6)) * Math.PI);
+        // a lane change is not a reason to sit still: keep rolling past the obstruction
+        vmax = Math.max(vmax, Math.min(limit * 0.75, 5.5));
+      } else if (v.swerve) v.swerve = Math.abs(v.swerve) < 0.05 ? 0 : v.swerve * Math.exp(-1.4 * dt);
 
       if (this.collisions) {
         const testDistance = v.halfLen + 2 + v.speed * 0.65;

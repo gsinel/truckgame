@@ -8,7 +8,8 @@ import { M, rnd, pick } from './textures';
 import { bus } from './events';
 import { ui, toast, notify } from './store';
 import { tr, t, money as formatMoney, number } from './i18n';
-import { CONTRACTS } from './regions';
+const text = tr;
+import { CONTRACTS, generateContracts, type CargoContract } from './regions';
 import { groundHeight } from './elevation';
 import { readProfile, writeProfile, PLAYER_TRUCK } from './profile';
 export { PLAYER_TRUCK } from './profile';
@@ -18,6 +19,9 @@ export interface Job {
   id: string; title: string; cargo: CargoType; cargoName: string; weight: number;
   from: string; to: string; km: number; reward: number; xp: number; blurb: string;
   appearance?: 'produce' | 'grain' | 'textile';
+  /** delivery window in game hours, derived from the real route length + cargo risk */
+  hours: number;
+  risk: 'normal' | 'fragile' | 'hazmat';
 }
 
 /* ------------------------------ economy ------------------------------ */
@@ -56,16 +60,31 @@ export function addXP(v: number) {
 }
 
 /* ------------------------------ job board ------------------------------ */
-const DEFS: Omit<Job, 'km' | 'reward'>[] = CONTRACTS;
+/** Generated offers ride on the authored ones; `boardGen` lets the player re-roll the
+ *  market without touching the hand-written contracts. */
+let boardGen = 0;
+export const RISK_PAY: Record<string, number> = { normal: 1, fragile: 1.15, hazmat: 1.3 };
+export const RISK_SENSITIVITY: Record<string, number> = { normal: 1, fragile: 1.7, hazmat: 1.4 };
+
+/** The board is rebuilt from this on every `buildJobs` call, so a re-roll is a real
+ *  market change rather than a fresh copy of the same list. */
+const defsFor = (): CargoContract[] => [...CONTRACTS, ...generateContracts(12, boardGen)];
 
 export function buildJobs(world: World, nav: Navigator): Job[] {
-  return DEFS.map((d) => {
+  return defsFor().map((d) => {
     const a = world.locations[d.from], b = world.locations[d.to];
     if (!a || !b) throw new Error(`Invalid contract endpoints: ${d.id}`);
     const r = nav.route(a, b);
     const km = r.length / 1000;
     const reward = Math.round((350 + km * 780 + d.weight / 1000 * 58) / 10) * 10;
-    return { ...d, km, reward };
+    // window = route length at ~44 km/h average + a fixed 25 min of yard work, plus slack
+    // for heavy loads; the shortest regional runs still land above 40 game minutes.
+    const hours = Math.max(0.7, km / 44 + 0.42 + d.weight / 1000 * 0.012);
+    const risk = d.risk ?? 'normal';
+    // a risky load pays more and punishes rough handling harder, and it gets a tighter
+    // window because the dispatcher is not going to loiter with it either
+    const pay = Math.round(reward * RISK_PAY[risk] / 10) * 10;
+    return { ...d, km, reward: pay, hours: risk === 'normal' ? hours : hours * 0.95, risk };
   });
 }
 
@@ -190,6 +209,9 @@ export class Missions {
   jobs: Job[] = [];
   active: Job | null = null;
   phase: 'none' | 'toPickup' | 'loading' | 'toDest' | 'unloading' = 'none';
+  /** deadline clock, in game minutes; ticks with the atmosphere time scale */
+  deadlineMin = 0; deadlineTotalMin = 0; timeScale = 1;
+  private lateWarned = false;
   route: Route | null = null;
   routeTimer = 0;
   pieces: THREE.Group[] = [];
@@ -235,6 +257,17 @@ export class Missions {
     }
   }
 
+  /** Re-roll the generated half of the market (authored offers always stay listed). */
+  rerollBoard(): number {
+    if (this.active) return 0;
+    boardGen = (boardGen + 1) % 997;
+    const jobs = buildJobs(this.world, this.nav);
+    this.jobs = jobs;
+    ui.jobs = jobs;
+    notify();
+    return jobs.length;
+  }
+
   get pickup() { return this.active ? this.world.locations[this.active.from] : null; }
   get dest() { return this.active ? this.world.locations[this.active.to] : null; }
   get target(): Location | null {
@@ -249,6 +282,9 @@ export class Missions {
     if (!job) return false;
     this.active = job;
     this.phase = 'toPickup';
+    this.deadlineTotalMin = this.deadlineMin = Math.round(job.hours * 60 * (this.sim.wet ? 1.15 : 1));
+    this.lateWarned = false;
+    ui.deadlineMin = this.deadlineMin; ui.deadlineTotalMin = this.deadlineTotalMin;
     this.dmgStart = this.sim.damage;
     this.approachArmed = false; this.hadContact = false;
     this.spawnStack(job);
@@ -285,8 +321,10 @@ export class Missions {
     this.sim.cargoKg = 0;
     this.active = null;
     this.phase = 'none';
+    this.deadlineMin = this.deadlineTotalMin = 0; ui.deadlineMin = 0; ui.deadlineTotalMin = 0;
     this.route = null;
     this.beacon.visible = false;
+    this.deadlineMin = this.deadlineTotalMin = 0; ui.deadlineMin = 0; ui.deadlineTotalMin = 0;
     ui.job = null; ui.phase = 'none'; ui.parking = null; ui.distRemain = 0; ui.navTarget = ''; ui.parkHint = ''; ui.loadProgress = 0;
     this.approachArmed = false; this.hadContact = false;
     notify();
@@ -297,6 +335,50 @@ export class Missions {
     this.pieces = [];
     this.anims = [];
     this.ropes.forEach((r) => (r.visible = false));
+  }
+
+  /** Called by Game every simulated frame (in cab *and* on foot), so the clock cannot
+   *  be paused by getting out of the truck. */
+  tick(dt: number) {
+    if (!this.active || this.phase === 'none' || dt <= 0) return;
+    const gh = (dt * this.timeScale) / 60; // game hours per real second (see atmosphere)
+    this.deadlineMin -= gh * 60;
+    ui.deadlineMin = this.deadlineMin;
+    if (this.deadlineMin < 0 && !this.lateWarned) {
+      this.lateWarned = true;
+      toast(t('jobLate', { cost: formatMoney(Math.round(this.active.reward * 0.1)) }), 'bad');
+    }
+    // a job that is 30 game minutes overdue is released by the dispatcher
+    if (this.deadlineMin < -30) {
+      const job = this.active;
+      const pen = Math.round(job.reward * 0.3);
+      bus.emit('JOB_EXPIRED', { job: job.id, cargo: job.cargoName, penalty: pen });
+      toast(t('jobExpired', { cargo: job.cargoName }), 'bad');
+      addMoney(-pen);
+      this.clearPieces();
+      this.sim.cargoKg = 0;
+      this.active = null; this.phase = 'none'; this.route = null; this.beacon.visible = false;
+      this.deadlineMin = this.deadlineTotalMin = 0;
+      ui.deadlineMin = 0; ui.deadlineTotalMin = 0; ui.job = null; ui.phase = 'none'; ui.parking = null; ui.distRemain = 0; ui.navTarget = '';
+      notify();
+    }
+  }
+
+  /**
+   * Session restore: a load that was already picked up goes straight back onto the
+   * trailer bed, exactly where the loading animation leaves it.
+   */
+  restoreInTransit() {
+    if (!this.active) return;
+    const slots = trailerSlots(this.active.cargo, this.pieces.length);
+    this.pieces.forEach((p, i) => {
+      const s = slots[i];
+      this.truck.cargo.add(p);
+      p.position.set(s.x, 0, s.z);
+      p.rotation.set(0, s.ry, 0);
+    });
+    this.finishLoading(false);
+    toast(tr.loadedFromSave ?? 'Yük kasadan geri yüklendi.', 'info');
   }
 
   private setBeacon(color: number) {
@@ -454,7 +536,7 @@ export class Missions {
     }
   }
 
-  private finishLoading() {
+  private finishLoading(announce = true) {
     const job = this.active!;
     this.sim.cargoKg = job.weight;
     this.phase = 'toDest';
@@ -462,8 +544,10 @@ export class Missions {
     ui.phase = 'toDest';
     this.routeTimer = 0;
     this.setBeacon(0x40ff80);
-    bus.emit('CARGO_LOADED', { job: job.id, cargo: job.cargoName, weight: job.weight });
-    toast(t('loaded', { weight: number(job.weight / 1000, 1), location: this.dest!.name }), 'good');
+    if (announce) {
+      bus.emit('CARGO_LOADED', { job: job.id, cargo: job.cargoName, weight: job.weight });
+      toast(t('loaded', { weight: number(job.weight / 1000, 1), location: this.dest!.name }), 'good');
+    }
     ui.loadProgress = 0;
     notify();
   }
@@ -471,6 +555,22 @@ export class Missions {
   private finishUnloading() {
     const job = this.active!;
     const pe = this.pendingResult.pe;
+    /* risky loads can be destroyed outright: the consignee refuses them and the
+       insurance takes the pay, so the run is lost rather than merely reduced */
+    const wreck = Math.max(0, this.sim.damage - this.dmgStart) * (RISK_SENSITIVITY[job.risk ?? 'normal'] ?? 1);
+    if ((job.risk === 'fragile' && wreck > 34) || (job.risk === 'hazmat' && wreck > 26)) {
+      bus.emit('DELIVERY_FAILED', { job: job.id, reason: 'cargo', damage: Math.round(wreck) });
+      toast(text.jobFailedCargo, 'bad');
+      addXP(-Math.round(job.xp * 0.2));
+      this.cleanup.push({ t: 14, pieces: [...this.pieces] });
+      this.pieces = []; this.anims = [];
+      this.approachArmed = false; this.hadContact = false;
+      this.sim.cargoKg = 0; this.active = null; this.phase = 'none'; this.route = null; this.beacon.visible = false;
+      this.deadlineMin = this.deadlineTotalMin = 0; ui.deadlineMin = 0; ui.deadlineTotalMin = 0;
+      ui.job = null; ui.phase = 'none'; ui.parking = null; ui.distRemain = 0; ui.navTarget = ''; ui.loadProgress = 0; ui.parkHint = '';
+      notify();
+      return;
+    }
     const score = pe.score as number;
     const dmg = Math.max(0, this.sim.damage - this.dmgStart);
     // collision during the parking manoeuvre caps the achievable grade
@@ -480,9 +580,13 @@ export class Missions {
     const finalGrade = finalScore >= 85 ? 'PERFECT' : finalScore >= 65 ? 'GOOD' : finalScore >= 40 ? 'OK' : 'POOR';
     const mult = finalGrade === 'PERFECT' ? 1.3 : finalGrade === 'GOOD' ? 1.1 : finalGrade === 'OK' ? 0.9 : 0.65;
     const xpMult = finalGrade === 'PERFECT' ? 1.4 : finalGrade === 'GOOD' ? 1.15 : finalGrade === 'OK' ? 1 : 0.7;
-    const dmgPenalty = Math.min(0.5, dmg * 0.012);
-    const money = Math.round((job.reward * mult * (1 - dmgPenalty)) / 10) * 10;
-    const xp = Math.round(job.xp * xpMult * (1 - dmgPenalty * 0.5));
+    const dmgPenalty = Math.min(0.5, dmg * 0.012 * (RISK_SENSITIVITY[job.risk ?? 'normal'] ?? 1));
+    // AC: deadline — early delivery pays a bonus, overdue delivery bleeds up to 40%
+    const lateMin = Math.max(0, -this.deadlineMin);
+    const timeFactor = this.deadlineMin >= this.deadlineTotalMin * 0.25 ? 1.08
+      : this.deadlineMin >= 0 ? 1 : Math.max(0.6, 1 - 0.016 * lateMin);
+    const money = Math.round((job.reward * mult * (1 - dmgPenalty) * timeFactor) / 10) * 10;
+    const xp = Math.round(job.xp * xpMult * (1 - dmgPenalty * 0.5) * (timeFactor >= 1 ? 1.05 : 0.9));
     addMoney(money);
     addXP(xp);
     if (finalScore >= 40) bus.emit('PARKING_SUCCESS', { score: finalScore, grade: finalGrade, lat: pe.lat, lon: pe.lon, contact });
@@ -491,6 +595,7 @@ export class Missions {
     ui.completion = {
       title: job.title, cargoName: job.cargoName, to: this.dest!.name, money, xp, grade: finalGrade, score: Math.round(finalScore),
       damage: Math.round(dmg), base: job.reward, penalty: Math.round(dmgPenalty * 100), contact,
+      onTime: this.deadlineMin >= 0, lateMin: Math.round(lateMin), timeBonus: Math.round((timeFactor - 1) * 100),
     };
     this.cleanup.push({ t: 14, pieces: [...this.pieces] });
     this.pieces = [];

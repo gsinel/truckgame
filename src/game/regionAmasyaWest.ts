@@ -55,7 +55,7 @@ const SOURCE = {
     {
       id: 'amasya.merzifon', provinceId: 'amasya', displayName: tr.merzifon, x: -1560, z: -760, elevation: EXPANSION_ELEVATION,
       populationScale: 'medium', industries: ['machinery', 'food', 'agriculture'],
-      fuelStations: ['amasya.merzifon.fuel'], garages: ['amasya.merzifon.garage'], restAreas: [],
+      fuelStations: ['amasya.merzifon.fuel', 'aloskegang.fuel'], garages: ['amasya.merzifon.garage', 'aloskegang.garage'], restAreas: [],
     },
     {
       id: 'amasya.suluova', provinceId: 'amasya', displayName: tr.suluova, x: -1000, z: -560, elevation: EXPANSION_ELEVATION,
@@ -68,6 +68,9 @@ const SOURCE = {
   ] as ExpansionVillage[],
   junctions: [
     { id: 'amasya.west.junction', x: -1250, z: -620 },
+    // ALOSKEGANG spur gate: final metres are gate * WORLD_SCALE; the compound is laid
+    // out from this node in a local frame (aloskegang.ts), so it follows the road.
+    { id: 'aloskegang.gate', x: -1505, z: -700 },
   ] as ExpansionJunction[],
   /**
    * Existing-network connection: the Amasya north-arm node ('amasya.northArm') -> Suluova.
@@ -95,11 +98,16 @@ const SOURCE = {
       id: 'merzifon-gumushacikoy.return', from: 'amasya.gumushacikoy.center', to: 'amasya.merzifon.ne', type: 'rural',
       via: [[-1330, -835], [-1395, -862]], signTo: tr.merzifon, signFrom: tr.gumushacikoy,
     },
+    {
+      id: 'merzifon-aloskegang.access', from: 'amasya.merzifon.se', to: 'aloskegang.gate', type: 'side',
+      via: [[-1523, -721.5]], signTo: tr.aloskegangShort, signFrom: tr.merzifon,
+    },
   ] as ExpansionRoad[],
   /** Location registry entries (id, name, type, cityId, provinceId). Built geometry lives in regionalExpansion.ts. */
   locations: [
     { id: 'merzifon.logistics', name: tr.merzifonSite, type: 'industrial', cityId: 'amasya.merzifon', provinceId: 'amasya', industry: 'machinery' },
     { id: 'suluova.food', name: tr.suluovaSite, type: 'industrial', cityId: 'amasya.suluova', provinceId: 'amasya', industry: 'food' },
+    { id: 'aloskegang.depot', name: tr.aloskegangDepot, type: 'industrial', cityId: 'amasya.merzifon', provinceId: 'amasya', industry: 'automotive' },
   ] as ExpansionLocation[],
   /** Jobs for the existing mission system: existing->new, new->existing, new->new. */
   contracts: [
@@ -107,6 +115,8 @@ const SOURCE = {
     { id: 'tr.food.market', cargo: 'goods', title: tr.cargoGoods, cargoName: tr.cargoFood, weight: 6600, from: 'suluova.food', to: 'market', xp: 190, blurb: tr.jobSuluova },
     { id: 'tr.grain.suluova', cargo: 'goods', appearance: 'grain', title: tr.cargoGrain, cargoName: tr.cargoWheat, weight: 9400, from: 'merzifon.logistics', to: 'suluova.food', xp: 170, blurb: tr.jobMerzifonSuluova },
     { id: 'tr.metal.merzifon', cargo: 'pallets', title: tr.cargoSteel, cargoName: tr.cargoFittings, weight: 11200, from: 'factory', to: 'merzifon.logistics', xp: 215, blurb: tr.jobMerzifonMetal },
+    { id: 'tr.gang.equipment', cargo: 'machinery', title: tr.cargoMachinery, cargoName: tr.aloskegangGarage, weight: 8800, from: 'warehouse', to: 'aloskegang.depot', xp: 230, blurb: tr.aloskegangMeetPrompt },
+    { id: 'tr.gang.grain', cargo: 'goods', appearance: 'grain', title: tr.cargoGrain, cargoName: tr.cargoWheat, weight: 9900, from: 'aloskegang.depot', to: 'suluova.food', xp: 205, blurb: tr.jobMerzifonSuluova },
   ] as CargoContract[],
 };
 
@@ -120,4 +130,7 @@ export const EXPANSION = {
   roads: SOURCE.roads.map(r => ({ ...r, via: r.via.map(scalePt) })),
   locations: SOURCE.locations,
   contracts: SOURCE.contracts,
+  /** Sites that need their own flat ground disc (same radius/blend as the cities). */
+  // Yard centre: the gate plus the ~96 m spur bearing (the apron grows away from town).
+  flat: [{ x: -1505 * K + 66, z: -700 * K + 74, elevation: EXPANSION_ELEVATION }],
 };

@@ -491,6 +491,22 @@ export function logoTex(): THREE.CanvasTexture {
   return t;
 }
 
+/** ALOSKEGANG wordmark: same band system as the NORDHAUL logo, in the community colours. */
+export function aloskeGangMarkTex(): THREE.CanvasTexture {
+  const [c, g] = canvas(128, 48);
+  g.fillStyle = '#e8e4d8'; g.fillRect(0, 0, 128, 48);
+  g.fillStyle = '#c23028'; g.fillRect(0, 0, 128, 6);
+  g.fillStyle = '#1c3f7a'; g.fillRect(0, 42, 128, 6);
+  g.fillStyle = '#161d22';
+  g.font = 'bold 20px monospace'; g.textAlign = 'center';
+  g.fillText('ALOSKEGANG', 64, 24);
+  g.font = 'bold 8px monospace'; g.fillStyle = '#5a6a72';
+  g.fillText(tr.aloskegangMarkSub, 64, 36);
+  const t = toTex(c);
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 function glowTexture() {
   const [c, g] = canvas(64, 64);
   const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
@@ -649,6 +665,7 @@ export function buildMaterials() {
   ] as const)
     sm(k, signTex('dir', t), { roughness: 0.5, metalness: 0.2 });
   sm('logo', logoTex(), { roughness: 0.4, metalness: 0.2 });
+  sm('gangLogo', aloskeGangMarkTex(), { roughness: 0.45, metalness: 0.1, emissive: 0x2a2a24, emissiveIntensity: 0 });
   const flag = make(96, 64, (g, w, h) => {
     g.fillStyle = '#d4272c'; g.fillRect(0, 0, w, h);
     g.fillStyle = '#fff'; g.beginPath(); g.arc(37, 32, 18, 0, Math.PI * 2); g.fill();

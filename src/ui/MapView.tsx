@@ -90,7 +90,18 @@ function buildBg() {
   for (const c of extraCities) label(upper(c.displayName), c.x, c.z - 140, '#fff0c8');
   g.font = '10px monospace';
   const labelled = ['village', 'forest', 'farm', 'industrial', 'amasya.riverfront', ...VILLAGES.map(v => v.id)];
-  for (const p of w.pois.filter(p => labelled.includes(p.id))) label(upper(p.name), p.x, p.z - 8, '#d4dcc8');
+  /* Places you have not driven into are still on the map — as an empty mark. The name
+     arrives with the discovery, which is the whole point of the list. */
+  const found = new Set(((window as any).__ui?.discoveries || []).map((d: any) => d.id));
+  for (const p of w.pois.filter(p => labelled.includes(p.id))) {
+    const known = found.has(p.id);
+    label(known ? upper(p.name) : '· · ·', p.x, p.z - 8, known ? '#d4dcc8' : '#6b7480');
+    if (!known) {
+      const [px, pz] = P(p.x, p.z);
+      g.strokeStyle = '#6b7480'; g.lineWidth = 1.4;
+      g.beginPath(); g.arc(px, pz - 20, 4, 0, Math.PI * 2); g.stroke();
+    }
+  }
   for (const l of Object.values(w.locations)) {
     const [x, z] = P(l.x, l.z);
     g.fillStyle = '#ffb030'; g.fillRect(x - 3, z - 3, 6, 6);

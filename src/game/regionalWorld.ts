@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { RoadGraph, RNode, REdge } from './roads';
-import { PROVINCES, REGIONAL_ROADS, REGIONAL_SITE_NAMES, CORE_NAMES, Province, PLATEAU_BRIDGE } from './regions';
+import { PROVINCES, REGIONAL_ROADS, REGIONAL_SITE_NAMES, CORE_NAMES, Province, PLATEAU_BRIDGE, CITY_PROFILES, CITY_BELTS } from './regions';
 import { groundHeight } from './elevation';
-import { buildCityLandmark } from './landmarks';
+import { buildCityLandmark, kingTombs } from './landmarks';
 import { tr, upper } from './i18n';
 import { M, extra, labelMaterial } from './textures';
 import { Ctx, apartment, shop, warehouse, house, bin, bench, picnic, pallet, containerStack, barrels, parkedCar, silo, busStop, tree, fenceLine } from './props';
@@ -31,12 +31,38 @@ export function extendRegionalNetwork(g: RoadGraph, anchors: Record<string, RNod
       e.key = `${p.id}.street.${a}.${b}`; e.provinceIds = [p.id];
     }
     nodes.center.light = true;
+    // the profile's outer pattern: a belt, a terrace road, a quay, freight aprons...
+    const belt = CITY_BELTS[`${p.id}.center`];
+    if (belt) {
+      for (const [key, dx, dz] of belt.nodes) {
+        const n = g.node(p.x + dx, p.z + dz, `${p.id}.${key}`);
+        nodes[key] = n; ports[`${p.id}.${key}`] = n;
+      }
+      for (const [a, b] of belt.edges) {
+        // 'village' pavement: painted centre line, walking band and lamps, and — unlike a
+        // rural corridor — no guard rail, because these streets thread between the city's
+        // own furniture and a rail there would sit inside the lane clearance envelope.
+        const e = g.connect(nodes[a], nodes[b], 'village');
+        e.key = `${p.id}.belt.${a}.${b}`; e.provinceIds = [p.id];
+      }
+    }
   }
   ports['plateau.bridgeWest'] = g.node(PLATEAU_BRIDGE.west.x, PLATEAU_BRIDGE.west.z, 'plateau.bridgeWest');
   ports['plateau.bridgeEast'] = g.node(PLATEAU_BRIDGE.east.x, PLATEAU_BRIDGE.east.z, 'plateau.bridgeEast');
   const bridge = g.connect(ports['plateau.bridgeWest'], ports['plateau.bridgeEast'], 'rural', [], { bridge: true, step: 4 });
   bridge.key = 'yozgat-sivas.bridge'; bridge.routeCode = 'D.200'; bridge.provinceIds = ['yozgat', 'sivas'];
   const corridors: REdge[] = [];
+  /* Sivas east gate. The Sungurlu road cannot cross the Yozgat corridor to reach the city,
+     so it owns a short approach street of its own that joins the ring at the east port —
+     the same trick the city belts use, and the reason the plateau road ends at a gate
+     instead of tunnelling through the freight yard. */
+  const sg = g.node(13100, 10980);
+  ports['sivas.sungurlu'] = sg;
+  {
+    const e = g.connect(sg, ports['sivas.east'], 'village', [[13010, 10905]], { step: 4 });
+    e.key = 'sivas.approach.east'; e.provinceIds = ['sivas']; e.routeCode = 'D.200';
+  }
+
   for (const r of REGIONAL_ROADS) {
     const a = ports[r.from], b = ports[r.to];
     const step = Math.hypot(b.x - a.x, b.z - a.z) > 2200 ? 5 : 1.8;
@@ -51,6 +77,18 @@ export function extendRegionalNetwork(g: RoadGraph, anchors: Record<string, RNod
   g.connect(anchors['amasya.riverNorth'], riverNorth, 'town', [[11, 35], [27, 58]]).key = 'amasya.riverfront.entry';
   g.connect(riverNorth, riverSouth, 'town').key = 'amasya.riverfront';
   g.connect(riverSouth, anchors['amasya.riverSouth'], 'town', [[38, 275], [25, 316], [10, 336]]).key = 'amasya.riverfront.exit';
+
+  /* Amasya sits in a valley, so it gets no ring square. Its traffic that does not want the
+     riverside promenade climbs the western shoulder in two long terraces and turns back
+     through the old gate — three streets, one continuous lap, and the cliff face above them. */
+  const tN = g.node(-700, -248), tS = g.node(-700, 248);
+  g.connect(anchors['amasya.northArm'], tN, 'village', [[-668, -244], [-630, -236]], { step: 4 }).key = 'amasya.belt.north-terrace';
+  g.connect(tN, tS, 'village', [[-716, -120], [-716, 120]], { step: 4 }).key = 'amasya.belt.terrace';
+  // straight chord on purpose: a spline here overshoots east into the first row of houses
+  // ...and the lap closes on the south bridge, not through the town: the west shoulder is a
+  // bypass you can drive end to end without touching the riverside promenade.
+  g.connect(tS, anchors['amasya.riverSouth'], 'village', [[-460, 300], [-220, 330]], { step: 4 }).key = 'amasya.belt.bypass';
+
   return { ports, corridors };
 }
 
@@ -243,6 +281,36 @@ export function buildRegionalSettlements(c: Ctx, root: THREE.Group, g: RoadGraph
       board(c, x, z, Math.atan2(-st.dx, -st.dz), tr.caution, 3, 1, 2.3, 'local');
       c.B.pop();
     }
+  }
+
+  // Amasya's silhouette: the Harşena rock tombs cut into the north shoulder. The spot is
+  // chosen from the road graph, so the cliff never lands on a street the way a fixed
+  // coordinate would, and it always keeps a valley viewpoint for the player to drive to.
+  {
+    // the north shoulder first (the real tombs look south over the city), then the valley sides
+    const cand: [number, number][] = [[-452, -330], [-372, -352], [-556, -322], [-660, -300], [-860, 118], [-742, 430]];
+    // score = the tighter of "how far from a street" and "how far from somebody else's
+    // building", so the cliff never lands inside the town the way a fixed coordinate can.
+    const propClear = (x: number, z: number) => {
+      let best = 1e9;
+      for (const k of c.col.all) {
+        const r = Math.max(k.hw ?? k.r, k.hd ?? k.r);
+        if (r < 3.2 || k.tag === 'water') continue;
+        const d = Math.hypot(k.cx - x, k.cz - z) - r;
+        if (d < best) best = d;
+      }
+      return best;
+    };
+    let spot = cand[cand.length - 1], score = -1e9;
+    for (const q of cand) {
+      const v = Math.min(g.nearest(q[0], q[1]).d, propClear(q[0], q[1]));
+      // 70 m is the compound's own footprint plus a shoulder: the first candidate that has
+      // it takes the spot, so the overlook above the city wins over an empty field.
+      if (v >= 70) { spot = q; score = v; break; }
+      if (v > score) { score = v; spot = q; }
+    }
+    kingTombs(c, spot[0], spot[1]);
+    pois.push({ id: 'amasya.tombs', name: tr.rockTombs, x: spot[0], z: spot[1] + 30, r: 96 });
   }
 
   // Amasya identity: riverside timber houses, promenade, valley ridges and Turkish signage.

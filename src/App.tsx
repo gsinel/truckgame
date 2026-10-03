@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { game } from './game/Game';
 import { Hud } from './ui/Hud';
 import { StartScreen, JobBoard, MapModal, PauseMenu, Completion } from './ui/Menus';
+import { StreamerOverlay } from './ui/StreamerOverlay';
 
 export default function App() {
   const ref = useRef<HTMLDivElement>(null);
@@ -16,6 +17,7 @@ export default function App() {
       <MapModal />
       <PauseMenu />
       <Completion />
+      <StreamerOverlay />
       <StartScreen />
     </div>
   );

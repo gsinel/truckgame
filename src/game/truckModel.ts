@@ -32,6 +32,10 @@ export interface TruckVisualState {
   indicator: number; // -1 left, 1 right, 2 hazard
   reversing: boolean;
   wiper: boolean;
+  /** wheel slip ratio — the ABS lamp is a real warning, not decoration */
+  slip: number;
+  radio: boolean;
+  overspeed: boolean;
   night: number;
   rain: number;
   pitch: number;
@@ -63,6 +67,10 @@ export class TruckModel {
   steerGroup = new THREE.Group();
   steerSpin = new THREE.Group();
   wipers: THREE.Group[] = [];
+  /* Damage smoke: billboards behind the cab, spawned from the exhaust side. Emitted
+     by the truck's own state, so it also exists in a replay of the cab camera. */
+  private smoke: { sp: THREE.Sprite; t: number; life: number; vx: number; vy: number; vz: number }[] = [];
+  private smokeT = 0;
   pedals: { acc: THREE.Object3D; brk: THREE.Object3D } = { acc: new THREE.Object3D(), brk: new THREE.Object3D() };
   handbrake = new THREE.Group();
   pendant = new THREE.Group();
@@ -559,8 +567,51 @@ export class TruckModel {
   }
 
   /* ------------------------------- update ------------------------------- */
+  private updateSmoke(s: TruckVisualState, dt: number) {
+    if (!this.smoke.length) {
+      for (let i = 0; i < 10; i++) {
+        const mat = new THREE.SpriteMaterial({
+          map: extra.glowTex, transparent: true, opacity: 0, depthWrite: false, fog: true,
+          color: 0x2b2b2b, blending: THREE.NormalBlending,
+        });
+        const sp = new THREE.Sprite(mat);
+        sp.scale.setScalar(0.4);
+        sp.visible = false;
+        this.root.add(sp);
+        this.smoke.push({ sp, t: 0, life: 1, vx: 0, vy: 0, vz: 0 });
+      }
+    }
+    const wear = Math.max(0, (s.damage - 22) / 78);
+    const load = s.throttle * 0.7 + Math.min(1, Math.abs(s.rpm) / 2400) * 0.3;
+    const rate = wear > 0 ? 0.34 - wear * 0.2 : 1e9;
+    this.smokeT += dt;
+    if (wear > 0 && this.smokeT > rate) {
+      this.smokeT = 0;
+      const p = this.smoke.find((q) => q.t >= q.life);
+      if (p) {
+        p.t = 0; p.life = 0.9 + wear * 1.1;
+        p.sp.visible = true;
+        p.sp.position.set(1.12, 4.0 + Math.random() * 0.2, 2.3);
+        p.sp.scale.setScalar(0.3 + load * 0.25);
+        (p.sp.material as THREE.SpriteMaterial).color.setHex(wear > 0.55 ? 0x1a1a1a : 0x4a4a48);
+        p.vx = (Math.random() - 0.5) * 0.5;
+        p.vy = 1.5 + load * 1.6;
+        p.vz = -0.6 - Math.abs(s.speed) * 0.045;
+      }
+    }
+    for (const p of this.smoke) {
+      if (p.t >= p.life) { if (p.sp.visible) { p.sp.visible = false; (p.sp.material as THREE.SpriteMaterial).opacity = 0; } continue; }
+      p.t += dt;
+      const k = p.t / p.life;
+      p.sp.position.x += p.vx * dt; p.sp.position.y += p.vy * dt; p.sp.position.z += p.vz * dt;
+      p.sp.scale.setScalar(0.3 + k * (1.5 + wear * 1.2));
+      (p.sp.material as THREE.SpriteMaterial).opacity = Math.max(0, 0.42 * (1 - k) * (0.35 + wear));
+    }
+  }
+
   update(s: TruckVisualState, fp: boolean) {
     const dt = s.dt;
+    this.updateSmoke(s, dt);
     // body suspension
     this.body.rotation.x = s.pitch;
     this.body.rotation.z = s.roll;
@@ -670,7 +721,8 @@ export class TruckModel {
     lamp(40, 114, s.handbrake, '#ff4a3a', 'P');
     lamp(56, 114, s.fuel < 0.15, '#ffb030', 'F');
     lamp(72, 114, s.damage > 50, '#ffb030', '!');
-    lamp(88, 114, false, '#ffb030', 'ABS');
+    lamp(88, 114, s.slip > 0.14, '#ffb030', 'ABS');
+    lamp(120, 114, s.overspeed, '#ff4a3a', '120');
     lamp(104, 114, s.wiper || s.rain > 0.2, '#40e0ff', 'W');
     lamp(220, 114, s.indicator === 1 || s.indicator === 2 ? blinkOn : false, '#40ff60', '►');
     this.clusterTex.needsUpdate = true;
@@ -682,7 +734,7 @@ export class TruckModel {
     h.fillStyle = '#d8f4ff'; h.font = '8px monospace'; h.textAlign = 'left';
     h.fillText(tr.radioTitle, 3, 8);
     h.fillStyle = '#40ffd0'; h.font = '9px monospace';
-    h.fillText(tr.radioIdle, 4, 24);
+    h.fillText(s.radio ? tr.radioStation : tr.radioIdle, 4, 24);
     h.fillStyle = '#7aa'; h.fillText(s.navText, 4, 38);
     h.fillStyle = '#ffb030'; h.fillText(`${s.hourText}   ${s.rain > 0.2 ? tr.rain : tr.clear}`, 4, 54);
     this.infoTex.needsUpdate = true;

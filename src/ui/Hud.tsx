@@ -2,7 +2,7 @@ import { useUI } from '../game/store';
 import { game } from '../game/Game';
 import { MiniMap } from './MapView';
 import { RainOverlay } from './RainOverlay';
-import { tr, money, number, distance, eventName } from '../game/i18n';
+import { tr, t, money, number, distance, dur, eventName } from '../game/i18n';
 import { PROVINCE_BY_ID } from '../game/regions';
 
 export const eur = money;
@@ -50,6 +50,20 @@ export function Hud() {
               <span><span className="dim" style={{ fontSize: 16 }}>{tr.distance} </span>{distance(s.distRemain)}</span>
               <span style={{ color: '#9dffc0' }}>{eur(job.reward)}</span>
             </div>
+            {s.deadlineTotalMin > 0 && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 17 }}>
+                  <span className="dim">{tr.timeLeft}</span>
+                  <span style={{ color: s.deadlineMin <= 0 ? '#ff8a70' : s.deadlineMin < s.deadlineTotalMin * 0.25 ? '#ffb030' : '#9dffc0' }}>
+                    {s.deadlineMin > 0 ? dur(s.deadlineMin) : t('lateFor', { n: number(-s.deadlineMin) })}
+                  </span>
+                </div>
+                <div className="bar" style={{ marginTop: 2 }}>
+                  <i style={{ width: `${Math.max(0, Math.min(100, (s.deadlineMin / s.deadlineTotalMin) * 100))}%`,
+                    background: s.deadlineMin <= 0 ? '#c23028' : s.deadlineMin < s.deadlineTotalMin * 0.25 ? '#ffb030' : '#40c878' }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -59,6 +73,25 @@ export function Hud() {
         <div className="panel" style={{ padding: '3px 16px', fontSize: 22, maxWidth: '46vw' }}>
           {s.objective}
         </div>
+        {s.job && (s.navInstruction || s.etaText) && (
+          <div className="panel" style={{ marginTop: 5, fontSize: 18, display: 'inline-flex', gap: 8, alignItems: 'center', background: 'rgba(8,13,21,0.9)' }}>
+            {s.navShield && <span style={{ background: '#155b91', color: '#fff', padding: '0 5px', fontSize: 16 }}>{s.navShield}</span>}
+            <span style={{ color: s.navDir === 'arrive' ? '#9dffc0' : '#ffb030' }}>{s.navInstruction}</span>
+            {s.etaText && <span className="dim" style={{ fontSize: 16 }}>{tr.eta} {s.etaText}</span>}
+          </div>
+        )}
+        {s.netOn && (
+          <div className="panel" style={{ marginTop: 5, fontSize: 16, display: 'inline-flex', gap: 10, alignItems: 'center', background: 'rgba(8,13,21,0.9)' }}>
+            <span style={{ color: s.convoyCount > 1 ? '#9dffc0' : '#7f8ea3' }}>{tr.convoy}</span>
+            <span>{s.convoyCount}/4</span>
+            {s.convoy?.length ? s.convoy.map((c: any) => (
+              <span key={c.name} className="dim">
+                {c.name} {c.dist < 900 ? `${Math.round(c.dist)} m` : `${(c.dist / 1000).toFixed(1)} km`}
+                {c.cargo ? <span style={{ color: '#ffb030' }}> · {c.cargo}</span> : null}
+              </span>
+            )) : <span className="dim">{tr.convoyAlone}</span>}
+          </div>
+        )}
         {s.parkHint && <div className="panel amber blink" style={{ marginTop: 6, fontSize: 20 }}>{s.parkHint}</div>}
       </div>
 
@@ -91,7 +124,7 @@ export function Hud() {
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 40, color: s.gear === 'R' ? '#ff8a60' : '#9dffc0', lineHeight: 0.9 }}>{s.gear}</div>
               {s.speedLimit > 0 && (
-                <div style={{ marginTop: 4, display: 'inline-block', width: 38, height: 38, borderRadius: 19, border: '4px solid #e03020', background: '#fff', color: '#111', fontSize: 22, lineHeight: '30px', textAlign: 'center' }}>{s.speedLimit}</div>
+                <div className={s.overLimit ? 'blink' : ''} style={{ marginTop: 4, display: 'inline-block', width: 38, height: 38, borderRadius: 19, border: `4px solid ${s.overLimit ? '#ff2a18' : '#e03020'}`, background: s.overLimit ? '#ffd8d0' : '#fff', color: '#111', fontSize: 22, lineHeight: '30px', textAlign: 'center' }}>{s.speedLimit}</div>
               )}
             </div>
           </div>
@@ -99,6 +132,10 @@ export function Hud() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
             <span className={low ? 'blink' : ''} style={{ color: low ? '#ff5242' : '#9fc4ff' }}>{tr.fuel} {number(s.fuel)} L</span>
             <span style={{ color: s.damage > 50 ? '#ff5242' : '#ffd070' }}>{tr.damage}: %{s.damage}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 17, color: '#8aa0c0', marginTop: 3 }}>
+            <span>{tr.odometer} {number(s.distanceKm || 0, 1)}</span>
+            {s.job && s.distRemain > 0 && <span className="dim">{tr.remaining}: {number(s.distRemain / 1000, 1)} km</span>}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <div className="bar" style={{ flex: 1 }}><i style={{ width: `${fuelPct}%`, background: low ? '#ff5242' : '#44e08c' }} /></div>
