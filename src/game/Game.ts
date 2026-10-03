@@ -8,11 +8,21 @@ import { TruckSim } from './physics';
 import { Traffic } from './traffic';
 import { Atmosphere, PostFX } from './atmosphere';
 import { Navigator } from './nav';
-import { Missions, loadProfile, addMoney, saveProfile } from './missions';
+import { Missions, loadProfile, addMoney, addXP, saveProfile } from './missions';
 import { GameAudio } from './audio';
+import { streamerState, streamerAdapter, MockStreamerProvider, KickStreamerProvider, type StreamerProvider } from './streamer';
+import { ALOSKEGANG } from './aloskegang';
+import { Convoy, BroadcastConvoyTransport, type ConvoyJobOffer } from './net';
+import { writeSession, readSession, clearSession, peekSession, SESSION_WORLD, type SessionSave } from './session';
 import { inWater, WORLD } from './terrain';
 import { extra } from './textures';
-import { tr as text, t, money, number, distance } from './i18n';
+import { tr as text, t, money, number, distance, dur } from './i18n';
+
+/** hh:mm from a fractional hour (the ETA readout uses the same clock as the cluster) */
+function clockAt(h: number) {
+  const norm = ((h % 24) + 24) % 24;
+  return `${String(Math.floor(norm)).padStart(2, '0')}:${String(Math.floor((norm % 1) * 60)).padStart(2, '0')}`;
+}
 import { provinceAt } from './regions';
 import { groundHeight, roadPitch } from './elevation';
 import { validatePhase2, validateWorldData } from './validation';
@@ -58,6 +68,10 @@ export class Game {
   private camAngle = 0;
   private camPos = new THREE.Vector3();
   private mirrorIdx = 0;
+  /** staggered shadow pass (see render()) — dirty forces the next frame to refresh */
+  private shadowFlip = 0; private shadowDirty = true;
+  /** peer dressings run at snapshot rate; netDress carries the dt they were given */
+  private netDressT = 0; private netDress = 0.1;
   /** cab camera: seat/eye height offset in metres (NUMPAD 8 / 2) */
   private camRise = 0;
   /** cab camera: head turn in radians (NUMPAD 4 / 6, springs back to 0) */
@@ -72,6 +86,21 @@ export class Game {
   wiperOn = false;
   hornOn = false;
   private lastCrash = 0;
+  /** meetup cooldown (s) so the community action cannot be farmed by tapping E */
+  private gangT = 0;
+  /** session autosave countdown (real seconds) */
+  private saveT = 45;
+  /** radar: seconds the rig has been over the posted limit, plus the re-arm timer */
+  private speedT = 0; private radarT = 0;
+  /** dispatch board re-roll cooldown */
+  private rerollT = 0;
+  /** indicator / reverse alarm timers (s) */
+  private indT = 0; private revT = 0;
+  /** convoy (local 2-4 rig layer): the transport, the mirrored rigs, the last hauled job */
+  net = new Convoy(new BroadcastConvoyTransport());
+  private netPeers = new Map<string, { model: TruckModel; x: number; z: number; yaw: number }>();
+  private netWired = false;
+  private netHaul: { cargo: string; km: number; reward: number } | null = null;
   private eventFeed: any[] = [];
   private frames = 0;
   private perfT = 0;
@@ -137,7 +166,9 @@ export class Game {
     sc.add(this.truck.root);
     sc.add(this.truck.trailer); // trailer lives in world space (articulated)
     this.nav = new Navigator(this.world.graph);
-    this.traffic = new Traffic(this.world.graph, 24, this.world.col);
+    // Traffic's own sizing; a smaller pool here used to leave the corridor quieter than
+    // the simulation was built for.
+    this.traffic = new Traffic(this.world.graph, 26, this.world.col);
     sc.add(this.traffic.group);
     const sp = this.world.spawn;
     this.sim.reset(sp.x, sp.z, sp.heading);
@@ -182,6 +213,13 @@ export class Game {
     ui.region = text.depotName;
     (window as any).__game = this;
     (window as any).__ui = ui; // diagnostics: same object the HUD renders
+    // the browser tab closing is the last honest save point
+    window.addEventListener('pagehide', () => this.saveSession());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') this.saveSession(); });
+    ui.hasSave = !!peekSession();
+    // ALOSKE/ALOSKEGANG live layer: one subscription, no gameplay coupling.
+    streamerAdapter.connect();
+    streamerState.useProvider(KickStreamerProvider.configured ? new KickStreamerProvider() : new MockStreamerProvider());
     notify();
     this.lastT = performance.now();
     requestAnimationFrame((t) => this.frame(t));
@@ -192,22 +230,203 @@ export class Game {
     ui.started = true;
     this.audio.start();
     saveProfile();
+    // "continue": world position, load, settings and discoveries come back from the
+    // session blob; progression (money/xp/level) already came from the profile.
+    const s = readSession(localStorage);
+    if (s) this.applySession(s, true);
+    this.netJoin();
     notify();
   }
+
+  /**
+   * Convoy. The transport is BroadcastChannel, so this is 2-4 rigs in one world across
+   * the tabs/windows of one browser profile — see src/game/net.ts and MULTIPLAYER_STATUS
+   * in ./status for what is deliberately not here (no server, no accounts, no wide area).
+   */
+  private netJoin() {
+    const net = this.net;
+    if (!net.supported) { ui.netOn = false; return; }
+    if (!net.active) net.join(`${ui.truckId}-${net.selfId.slice(0, 3)}`);
+    ui.netOn = net.active;
+    if (this.netWired) { notify(); return; }
+    this.netWired = true;
+    window.addEventListener('pagehide', () => net.leave());
+    bus.on('DELIVERY_ACCEPTED', () => {
+      const j = this.missions.active as any;
+      if (!j) return;
+      this.netHaul = { cargo: j.cargoName, km: j.km, reward: j.reward };
+      const offer: ConvoyJobOffer = { title: j.title, cargo: j.cargo, cargoName: j.cargoName, weight: j.weight,
+        from: j.from, to: j.to, km: j.km, reward: j.reward, xp: j.xp, blurb: j.blurb, hours: j.hours, risk: j.risk, appearance: j.appearance };
+      net.shareJob(offer);
+    });
+    bus.on('DELIVERY_COMPLETED', (e) => net.announceHaul({ cargo: this.netHaul?.cargo ?? '', km: this.netHaul?.km ?? 0, reward: Number(e.data?.money ?? 0), ok: true }));
+    bus.on('DELIVERY_FAILED', (e) => net.announceHaul({ cargo: this.netHaul?.cargo ?? '', km: this.netHaul?.km ?? 0, reward: 0, ok: e.data?.reason !== 'cancelled' }));
+    net.onJob = (from, offer, offerId) => {
+      if (this.missions.jobs.some((j) => j.id === offerId)) return;
+      // same dispatch entry, local id: the route is computed from the local nav graph
+      const job = { id: offerId, ...offer } as unknown as (typeof this.missions.jobs)[number];
+      this.missions.jobs.push(job);
+      notify();
+      toast(t('convoyOffer', { name: from, title: offer.title }), 'info');
+    };
+    net.onHaul = (from, haul) => {
+      bus.emit('CONVOY_HAUL', { name: from, cargo: haul.cargo, km: haul.km, reward: haul.reward, ok: haul.ok });
+      toast(t(haul.ok ? 'convoyHaul' : 'convoyHaulFail', { name: from, cargo: haul.cargo, reward: money(haul.reward) }), haul.ok ? 'good' : 'bad');
+    };
+  }
+
+  private setConvoy(on: boolean) {
+    if (on) this.netJoin();
+    else {
+      this.net.leave();
+      for (const p of this.netPeers.values()) this.scene.remove(p.model.root);
+      this.netPeers.clear();
+    }
+    ui.netOn = this.net.active;
+    this.shadowDirty = true;
+    ui.convoyCount = this.net.count;
+    ui.convoy = [];
+    toast(ui.netOn ? text.convoyOn : text.convoyOff, 'info');
+    notify();
+  }
+
+  /** Snapshot of the *gameplay* state only — no generated scenery, ever. */
+  saveSession() {
+    if (!ui.started) return;
+    const sim = this.sim;
+    const job = this.missions.active;
+    const s: SessionSave = {
+      v: 1, worldVersion: SESSION_WORLD, savedAt: Date.now(),
+      pos: { x: sim.x, z: sim.z, heading: sim.heading },
+      fuel: sim.fuel, damage: sim.damage, distance: sim.distance,
+      hour: this.atm.hour, weather: this.atm.weather, pixel: ui.pixel || 2,
+      streamerOn: streamerState.enabled, streamerProvider: streamerState.provider.kind,
+      discovered: [...this.discovered],
+      stats: streamerState.snapshot.counts,
+      job: job && (this.missions.phase === 'toPickup' || this.missions.phase === 'loading' || this.missions.phase === 'toDest' || this.missions.phase === 'unloading')
+        ? { id: job.id, phase: this.missions.phase } : null,
+    };
+    if (writeSession(localStorage, s)) { ui.savedAt = s.savedAt; ui.hasSave = true; }
+  }
+
+  applySession(s: SessionSave, announce: boolean) {
+    if (s.worldVersion !== SESSION_WORLD) { if (announce) toast(text.saveWorldMismatch, 'warn'); return; }
+    const sim = this.sim;
+    if (!inWater(s.pos.x, s.pos.z)) {
+      Object.assign(sim, { x: s.pos.x, z: s.pos.z, heading: s.pos.heading, ry: s.pos.heading, trailerYaw: 0,
+        vx: 0, vz: 0, vy: 0, yawRate: 0, throttle: 0, brake: 0, handbrake: true, engineOn: false });
+      this.player.x = s.pos.x; this.player.z = s.pos.z;
+    }
+    sim.fuel = Math.min(sim.fuelCap, s.fuel);
+    sim.damage = s.damage;
+    sim.distance = s.distance;
+    this.atm.hour = s.hour;
+    this.setWeather(s.weather);
+    ui.pixel = s.pixel; this.resize();
+    for (const id of s.discovered) this.discovered.add(id);
+    ui.discoveries = s.discovered.map((id, i) => ({ id, name: this.world.pois.find(p => p.id === id)?.name ?? id, at: i }));
+    streamerState.restore(s.streamerOn, s.streamerProvider, s.stats);
+    ui.savedAt = s.savedAt; ui.hasSave = true;
+    if (s.job) {
+      if (this.missions.accept(s.job.id) && s.job.phase !== 'toPickup') this.missions.restoreInTransit();
+    }
+    if (announce) {
+      toast(t('saveLoaded', { money: money(ui.money), level: number(ui.level) }), 'good');
+    }
+    notify();
+  }
+
+  /** New game: session cleared, progression rewritten to the starting values. */
+  newGame() {
+    clearSession(localStorage);
+    if (this.missions.active) this.missions.cancel();
+    const sim = this.sim, sp = this.world.spawn;
+    Object.assign(sim, { x: sp.px, z: sp.pz, heading: sp.pyaw, ry: sp.pyaw, trailerYaw: 0, vx: 0, vz: 0, vy: 0,
+      fuel: sim.fuelCap, damage: 0, distance: 0, handbrake: true, engineOn: false, cargoKg: 0 });
+    this.player.x = sp.px; this.player.z = sp.pz;
+    ui.money = 2500; ui.xp = 0; ui.level = 1; ui.xpNext = 450; ui.truckOwned = true;
+    saveProfile();
+    this.discovered.clear(); ui.discoveries = [];
+    streamerState.reset();
+    this.atm.hour = 8; this.setWeather('clear');
+    this.mode = 'foot';
+    ui.hasSave = false; ui.savedAt = 0;
+    toast(text.newGame, 'info');
+    notify();
+  }
+
+  resetSave() {
+    clearSession(localStorage);
+    try {
+      localStorage.removeItem('nordhaul_p1_save');
+      localStorage.removeItem('nordhaul_p1_save_backup');
+      localStorage.removeItem('nordhaul_p1');
+    } catch { /* storage may be denied; the in-memory state is still reset */ }
+    ui.hasSave = false; ui.savedAt = 0;
+    this.newGame();
+    toast(text.saveReset, 'warn');
+  }
+
+  /** used by the title screen to decide between DEVAM ET and BAŞLA */
+  hasSession() { return !!peekSession(); }
   openMenu(m: 'jobs' | 'map' | 'pause' | null) {
     ui.menu = ui.menu === m ? null : m;
-    if (ui.menu) this.keys.clear();
+    if (ui.menu) { this.keys.clear(); if (ui.menu === 'pause') this.saveSession(); }
     notify();
   }
   closeMenu() { ui.menu = null; this.keys.clear(); notify(); }
   acceptJob(id: string) { if (this.missions.accept(id)) { ui.menu = null; this.audio.chime(true); notify(); } }
   cancelJob() { this.missions.cancel(); notify(); }
-  dismissCompletion() { ui.completion = null; notify(); }
+  /** PİYASAYI YENİLE — re-rolls the generated offers (a 45 s cooldown keeps it honest). */
+  rerollBoard() {
+    if (this.rerollT > 0) { toast(t('rerollWait', { n: number(Math.ceil(this.rerollT)) }), 'warn'); return; }
+    this.rerollT = 45;
+    const n = this.missions.rerollBoard();
+    this.audio.chime(true);
+    toast(`${text.dispatch}: ${n}`, 'info');
+    notify();
+  }
+  dismissCompletion() { ui.completion = null; this.saveSession(); notify(); }
+  /** pause-menu action: writing the blob is cheap, so the button always works */
+  manualSave() { this.saveSession(); toast(text.saveWritten, 'good'); notify(); }
   setWeather(w: 'clear' | 'rain') { this.atm.setWeather(w); ui.weather = w; notify(); }
   setHour(h: number) { this.atm.hour = h; notify(); }
   setTimeScale(s: number) { this.atm.timeScale = s; ui.timeScale = s; notify(); }
   setAutoWeather(b: boolean) { this.atm.autoWeather = b; ui.autoWeather = b; notify(); }
   setPixel(p: number) { ui.pixel = p; this.resize(); notify(); }
+  /** the cab radio is a synthesised modal bed, not a recording — and it is cab-only */
+  setRadio(on: boolean) {
+    ui.radioOn = on;
+    this.audio.setRadio(on && this.mode === 'cab');
+    notify();
+  }
+  /** F4 — the live layer is opt-in; nothing renders when it is off. */
+  setStreamer(on: boolean) { this.shadowDirty = true; streamerState.setEnabled(on); toast(on ? text.streamerEnabled : text.streamerDisabled, 'info'); }
+  setStreamerProvider(kind: 'mock' | 'kick') {
+    streamerState.useProvider(kind === 'kick' ? new KickStreamerProvider() : new MockStreamerProvider());
+    if (streamerState.enabled) streamerState.setEnabled(true);
+    notify();
+  }
+  /** ALOSKEGANG meetup: an in-world community action, not a UI button. */
+  callCommunityMeetup() {
+    if (this.gangT > 0) return;
+    this.gangT = 60;
+    const count = 6 + Math.floor(Math.random() * 9);
+    addXP(25);
+    bus.emit('COMMUNITY_EVENT', { place: ALOSKEGANG.locationId, drivers: count, xp: 25 });
+    toast(t('aloskegangMet', { count }), 'good');
+    notify();
+  }
+  /** Certified weigh ticket at the depot scale — small money, real reason to stop on it. */
+  weighTruck() {
+    const kg = this.sim.cargoKg;
+    if (kg <= 0) { toast(text.aloskegangWeighEmpty, 'warn'); return; }
+    const fee = Math.round(40 + kg / 1000 * 6);
+    addMoney(fee);
+    toast(t('aloskegangWeigh', { weight: number(kg / 1000, 1), cost: money(fee) }), 'good');
+    bus.emit('COMMUNITY_EVENT', { place: 'aloskegang.scale', weight: kg, fee });
+    notify();
+  }
   toggleMute() { this.audio.muted = !this.audio.muted; notify(); }
 
   getMapState() {
@@ -249,14 +468,15 @@ export class Game {
     bus.on('FUEL_EMPTY', () => toast(text.fuelEmpty, 'bad'));
     bus.on('WEATHER_CHANGED', (e) => toast(e.data.weather === 'rain' ? text.rainStarts : text.rainStops, 'info'));
     bus.on('NEW_LOCATION_DISCOVERED', (e) => toast(t('discovered', { location: e.data.name }), 'good'));
-    bus.on('DELIVERY_COMPLETED', () => this.audio.chime(true));
+    bus.on('DELIVERY_COMPLETED', () => { this.audio.chime(true); this.saveSession(); });
+    bus.on('JOB_EXPIRED', () => this.saveSession());
     bus.on('PARKING_FAILED', () => this.audio.chime(false));
     void feedTypes;
   }
 
   private bindInput() {
     const prevent = new Set([
-      'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab',
+      'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'F4',
       // cab camera numpad controls (these also fire when NumLock is off)
       'Numpad8', 'Numpad2', 'Numpad4', 'Numpad6',
     ]);
@@ -323,10 +543,13 @@ export class Game {
       case 'KeyX': ui.indicator = ui.indicator === 1 ? 0 : 1; this.audio.click(700); break;
       case 'KeyB': ui.indicator = ui.indicator === 2 ? 0 : 2; this.audio.click(700); break;
       case 'KeyV': this.wiperOn = !this.wiperOn; this.audio.click(600); break;
-      case 'KeyT': this.setWeather(this.atm.weather === 'rain' ? 'clear' : 'rain'); break;
+      case 'KeyN': this.setRadio(!ui.radioOn); break;
+      case 'KeyT': this.setWeather(this.atm.weather === 'rain' ? 'clear' : 'rain'); this.shadowDirty = true; break;
       case 'KeyR': this.recover(false); break;
+      case 'F4': this.setStreamer(!ui.streamerOn); break;
       case 'Space': if (this.mode === 'cab') { this.sim.handbrake = !this.sim.handbrake; this.audio.click(300, 0.08); } break;
       case 'F3': ui.showEvents = !ui.showEvents; notify(); break;
+      case 'KeyK': this.setConvoy(!ui.netOn); break;
     }
   }
 
@@ -387,6 +610,14 @@ export class Game {
     notify();
   }
 
+  /** POI-relative proximity, used for the ALOSKEGANG yard actions. */
+  private nearGangPoint(id: string, r: number) {
+    const p = this.world.pois.find(q => q.id === id);
+    if (!p) return false;
+    const x = this.mode === 'cab' ? this.sim.x : this.player.x, z = this.mode === 'cab' ? this.sim.z : this.player.z;
+    return Math.hypot(p.x - x, p.z - z) < r;
+  }
+
   private fuelNearPump() {
     const t = this.sim.tankPoint;
     for (const p of this.world.pumps) if (Math.hypot(t.x - p.x, t.z - p.z) < 3.9) return true;
@@ -403,6 +634,7 @@ export class Game {
       const tk = this.world.terminal;
       if (dd < 3.6) this.prompt = { text: text.enter, key: 'F', run: () => this.enterTruck() };
       else if (Math.hypot(this.player.x - tk.x, this.player.z - tk.z) < 3.2) this.prompt = { text: text.openJobs, key: 'E', run: () => this.openMenu('jobs') };
+      else if (this.nearGangPoint(ALOSKEGANG.poiId, 34)) this.prompt = { text: text.aloskegangBoard, key: 'E', run: () => this.openMenu('jobs') };
     } else {
       const m = this.missions.update(dt, this.atm.time);
       if (m) this.prompt = { text: m.text, key: 'E', run: m.run };
@@ -411,6 +643,10 @@ export class Game {
       else if (stopped && this.fuelNearPump() && this.sim.fuel < this.sim.fuelCap - 1) this.prompt = { text: t('refuel', { price: money(FUEL_PRICE, 2) }), key: 'E', run: () => this.startFueling() };
       else if (stopped && this.world.garages.some(g => Math.hypot(this.sim.x - g.x, this.sim.z - g.z) < g.r) && this.sim.damage > 0.5)
         this.prompt = { text: t('repair', { cost: money(this.sim.damage * REPAIR_PER_PT) }), key: 'E', run: () => this.startRepair() };
+      else if (stopped && this.nearGangPoint(`${ALOSKEGANG.poiId}.scale`, 7))
+        this.prompt = { text: text.aloskegangWeighGo, key: 'E', run: () => this.weighTruck() };
+      else if (stopped && this.nearGangPoint(ALOSKEGANG.poiId, 42) && !this.missions.active)
+        this.prompt = { text: text.aloskegangMeet, key: 'E', run: () => this.callCommunityMeetup() };
       else if (stopped) this.prompt = { text: text.exit, key: 'F', run: () => this.exitTruck() };
     }
     if (this.mode === 'foot') this.missions.update(dt, this.atm.time);
@@ -565,6 +801,50 @@ export class Game {
         if (this.lastInd && Math.abs(sim.steerIn) < 0.08 && Math.abs(sim.yawRate) < 0.03) { ui.indicator = 0; this.lastInd = 0; }
       } else this.lastInd = 0;
 
+      /* ---- speed-limit enforcement (EDS) ----
+         The limit comes from the edge under the wheels (ui.speedLimit, set in the
+         discovery/province tick). Two thirds of the posted limit is the tolerance a
+         fixed camera in Türkiye actually uses, then a tiered administrative fine. */
+      if (this.mode === 'cab' && ui.speedLimit > 0) {
+        const kmh = Math.abs(sim.speedKmh);
+        const over = kmh - ui.speedLimit;
+        ui.overLimit = over > 0 ? 1 : 0;
+        if (over > Math.max(4, ui.speedLimit * 0.18)) {
+          this.speedT += sdt;
+          if (this.speedT > 2.2 && this.radarT <= 0 && ui.started) {
+            this.radarT = 75; this.speedT = 0;
+            const heavy = sim.cargoKg > 12000 ? 1.25 : 1;
+            const fine = Math.round((over > ui.speedLimit * 0.4 ? 951 : 442) * heavy);
+            addMoney(-fine);
+            bus.emit('SPEEDING', { kmh: Math.round(kmh), limit: ui.speedLimit, fine, over: Math.round(over) });
+            toast(t('speedingFine', { limit: number(ui.speedLimit), kmh: number(Math.round(kmh)), fine: money(fine) }), 'bad');
+            notify();
+          }
+        } else this.speedT = Math.max(0, this.speedT - sdt * 2);
+      } else if (ui.overLimit) { ui.overLimit = 0; this.speedT = 0; }
+      if (this.radarT > 0) this.radarT = Math.max(0, this.radarT - sdt);
+      if (this.rerollT > 0) this.rerollT = Math.max(0, this.rerollT - sdt);
+      /* ---- audible state the truck already knows about ---- */
+      if (this.mode === 'cab') {
+        if (ui.indicator) {
+          this.indT -= sdt;
+          if (this.indT <= 0) { this.indT = ui.indicator === 2 ? 0.5 : 0.92; this.audio.click(ui.indicator === 2 ? 980 : 840, 0.028); }
+        } else this.indT = 0;
+        if (sim.reverse && Math.abs(sim.vf) > 0.6) {
+          this.revT -= sdt;
+          if (this.revT <= 0) { this.revT = 0.85; this.audio.beep(920, 0.17, 0.05); }
+        } else this.revT = 0;
+        if (this.radarT > 70) this.audio.beep(1320, 0.1, 0.05);
+        if (ui.radioOn !== this.audio.radioOn) this.audio.setRadio(ui.radioOn);
+      } else if (this.audio.radioOn) this.audio.setRadio(false);
+
+      // job deadline + community cooldown + autosave
+      this.missions.timeScale = this.atm.timeScale;
+      this.missions.tick(sdt);
+      if (this.gangT > 0) this.gangT = Math.max(0, this.gangT - sdt);
+      this.saveT -= sdt;
+      if (this.saveT <= 0) { this.saveT = 45; this.saveSession(); }
+
       // interactions
       this.updateInteractions(sdt);
       if (this.hornOn && this.mode !== 'cab') this.hornOn = false;
@@ -579,7 +859,12 @@ export class Game {
           const d = Math.hypot(p.x - px, p.z - pz);
           if (d < p.r) {
             region = p.name;
-            if (!this.discovered.has(p.id)) { this.discovered.add(p.id); bus.emit('NEW_LOCATION_DISCOVERED', { id: p.id, name: p.name }); }
+            if (!this.discovered.has(p.id)) {
+              this.discovered.add(p.id);
+              ui.discoveries = [...this.discovered].map((id) => ({ id, name: this.world.pois.find(q => q.id === id)?.name ?? id, at: Date.now() }));
+              bus.emit('NEW_LOCATION_DISCOVERED', { id: p.id, name: p.name });
+              this.saveSession();
+            }
           }
         }
         ui.region = region;
@@ -606,15 +891,30 @@ export class Game {
     tr.trailer.position.set(h.x, groundHeight(h.x, h.z) + 0.10, h.z);
     tr.trailer.rotation.set(roadPitch(h.x - Math.sin(sim.trailerYaw) * 5, h.z - Math.cos(sim.trailerYaw) * 5, sim.trailerYaw, 10), sim.trailerYaw, 0, 'YXZ');
     const gear = sim.reverse ? 'R' : sim.handbrake && Math.abs(sim.vf) < 0.3 ? 'P' : Math.abs(sim.vf) < 0.3 && sim.throttle < 0.05 ? 'N' : `D${sim.gear}`;
-    const navText = this.missions.active ? distance(ui.distRemain) : text.noJob;
+    /* ---- turn-by-turn + ETA: derived from the planned polyline, refreshed with the
+       same half-second tick that already updates region / speed limit ---- */
+    const rt = this.missions.route;
+    if (rt && this.missions.active) {
+      const gd = Navigator.guidance(rt, sim.x, sim.z, Math.max(18, Math.abs(sim.speedKmh)));
+      ui.navDir = gd.dir;
+      ui.navInstruction = gd.dir === 'arrive' ? text.navArrive
+        : gd.dist <= 0 ? (gd.dir === 'left' ? text.navLeft : gd.dir === 'right' ? text.navRight : text.navStraight)
+        : `${distance(gd.dist)} · ${gd.dir === 'left' ? text.navLeft : gd.dir === 'right' ? text.navRight : text.navStraight}`;
+      ui.etaText = `${dur(gd.etaMin)} · ${clockAt(this.atm.hour + gd.etaMin / 60)}`;
+      const ne = this.world.graph.nearest(sim.x, sim.z);
+      ui.navShield = ne.d < 40 ? (ne.e.routeCode || '') : '';
+    } else if (ui.navInstruction) { ui.navInstruction = ''; ui.etaText = ''; ui.navShield = ''; ui.navDir = ''; }
+    const navText = this.missions.active ? (ui.navInstruction || distance(ui.distRemain)) : text.noJob;
     const vs: TruckVisualState = {
       speed: sim.speedKmh, rpm: sim.rpm, fuel: sim.fuel / sim.fuelCap, damage: sim.damage, gear,
       steer: sim.steerIn, steerAngle: sim.steerAngle, throttle: sim.throttle, brake: sim.brake, handbrake: sim.handbrake,
       headlights: ui.headlights, indicator: ui.indicator, reversing: sim.reverse && sim.throttle > 0.05,
+      slip: Math.abs(sim.slip ?? 0), radio: ui.radioOn, overspeed: ui.overLimit === 1,
       wiper: this.wiperOn, night: this.atm.night, rain: this.atm.rain, pitch: sim.pitch, roll: sim.roll, bounce: sim.bounce,
       trailerRoll: sim.trailerRoll, wheelSpin: sim.wheelSpin, distKm: sim.distance / 1000, time: this.atm.time,
       hourText: this.atm.hourText(), navText, dt: rdt,
     };
+    this.netTick(sdt, rdt, sim, vs);
     const fp = this.mode === 'cab' && this.camMode === 'cab';
     tr.update(vs, fp);
     tr.root.updateMatrixWorld(true);
@@ -630,11 +930,66 @@ export class Game {
       ui.speed = sim.speedKmh; ui.rpm = sim.rpm; ui.gear = gear; ui.fuel = sim.fuel; ui.fuelCap = sim.fuelCap;
       ui.damage = Math.round(sim.damage); ui.hour = this.atm.hour; ui.weather = this.atm.weather;
       ui.handbrake = sim.handbrake; ui.mode = this.mode; ui.cam = this.camMode; ui.phase = this.missions.phase;
+      ui.distanceKm = sim.distance / 1000;
       if (!this.missions.active) ui.objective = this.mode === 'foot' ? text.enterObjective : text.freeObjective;
       else ui.objective = this.missions.phase === 'toPickup' ? t('pickupObjective', { location: this.missions.pickup!.short })
         : this.missions.phase === 'toDest' ? t('deliveryObjective', { location: this.missions.dest!.short }) : this.missions.phase === 'loading' ? text.loadProgress : text.unloadProgress;
       notify();
     }
+  }
+
+  /**
+   * Publish this rig's snapshot and mirror the peers. Remote rigs are interpolated
+   * between snapshots (10 Hz) exactly like AI traffic is smoothed, never simulated —
+   * two tabs cannot share one physics clock, and pretending otherwise would desync.
+   */
+  private netTick(sdt: number, rdt: number, sim: TruckSim, vs: TruckVisualState) {
+    const net = this.net;
+    if (!net.active) {
+      if (this.netPeers.size) {
+        for (const p of this.netPeers.values()) this.scene.remove(p.model.root);
+        this.netPeers.clear();
+        ui.convoy = []; ui.convoyCount = 1;
+      }
+      return;
+    }
+    const job = this.missions.active;
+    net.tick(sdt, { x: sim.x, z: sim.z, yaw: sim.heading, kmh: Math.abs(sim.speedKmh), trailer: true,
+      cargo: job ? job.cargoName : '', damage: sim.damage, onFoot: this.mode === 'foot' });
+    this.netDressT += sdt;
+    const dress = this.netDressT >= 0.1;
+    if (dress) { this.netDressT = 0; this.netDress = 0.1; }
+    const seen = new Set<string>();
+    for (const m of net.roster) {
+      seen.add(m.id);
+      let p = this.netPeers.get(m.id);
+      if (!p) {
+        const model = new TruckModel();
+        this.scene.add(model.root);
+        p = { model, x: m.pose.x, z: m.pose.z, yaw: m.pose.yaw };
+        model.root.position.set(p.x, groundHeight(p.x, p.z) + 0.02, p.z);
+        model.root.rotation.set(0, p.yaw, 0);
+        this.netPeers.set(m.id, p);
+      }
+      // Interpolate the small deltas; a gap over 60 m is a stall (a backgrounded tab, a
+      // respawn, a lost snapshot) so the rig is placed outright instead of sliding.
+      const dx = m.pose.x - p.x, dz = m.pose.z - p.z;
+      const k = (dx * dx + dz * dz) > 3600 ? 1 : Math.min(1, rdt * 7);
+      p.x += dx * k;
+      p.z += dz * k;
+      p.yaw += wrap(m.pose.yaw - p.yaw) * k;
+      p.model.root.position.set(p.x, groundHeight(p.x, p.z) + 0.02, p.z);
+      p.model.root.rotation.set(0, p.yaw, 0);
+      p.model.trailer.visible = m.pose.trailer && !m.pose.onFoot;
+      if (!dress) { p.model.root.updateMatrixWorld(true); continue; }
+      p.model.update({ ...vs, speed: m.pose.kmh, rpm: 700 + Math.abs(m.pose.kmh) * 24, gear: m.pose.kmh > 1 ? 'D' : 'N',
+        damage: m.pose.damage, indicator: m.pose.onFoot ? 2 : 0, handbrake: m.pose.onFoot, throttle: 0, brake: 0,
+        slip: 0, steer: 0, steerAngle: 0, reversing: false, radio: false, overspeed: false, dt: this.netDress }, false);
+      p.model.root.updateMatrixWorld(true);
+    }
+    for (const [id, p] of this.netPeers) if (!seen.has(id)) { this.scene.remove(p.model.root); this.netPeers.delete(id); }
+    ui.convoyCount = net.count;
+    ui.convoy = net.roster.map((m) => ({ name: m.name, dist: Math.round(Math.hypot(m.pose.x - sim.x, m.pose.z - sim.z)), cargo: m.pose.cargo, kmh: Math.round(m.pose.kmh) }));
   }
 
   /* ---------------------------------- camera ---------------------------------- */
@@ -732,7 +1087,13 @@ export class Game {
     this.camera.updateMatrixWorld();
     updateLOD(this.camera.position.x, this.camera.position.z);
     this.renderer.info.reset();
-    this.renderer.shadowMap.needsUpdate = true;
+    /* Shadow pass every other frame. It is a full 2048 render of every caster inside the
+       sun frustum — by far the most expensive thing this scene does — and the shadow
+       camera is a box that a rig at 80 km/h crosses 22 cm per frame at 60 fps: the
+       aliasing is invisible, the saving is not. Anything that changes the light or drops
+       new geometry in sets shadowDirty and refreshes immediately. */
+    this.shadowFlip = (this.shadowFlip + 1) % 2;
+    if (this.shadowFlip === 0 || this.shadowDirty) { this.renderer.shadowMap.needsUpdate = true; this.shadowDirty = false; }
     if (this.mode === 'cab' && this.camMode === 'cab') this.renderMirrors();
     this.post.render(this.scene, this.camera, this.atm.exposure, this.atm.rain, this.atm.night);
     // night-reactive name boards

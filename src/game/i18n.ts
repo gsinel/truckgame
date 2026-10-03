@@ -105,13 +105,47 @@ export const tr = {
   corumGate: 'Hattuşa Aslanlı Kapı', tokatCastle: 'Tokat Kalesi', samsunLighthouse: 'Samsun Feneri',
   sivasStation: 'Sivas Garı', yozgatClock: 'Yozgat Saat Kulesi', gumushBridge: 'Gümüşhacıköy Taş Köprüsü',
   roadSamsun: 'Samsun Yolu', roadTokat: 'Tokat Yolu', roadCorum: 'Çorum Yolu', roadYozgat: 'Yozgat Yolu', roadSivas: 'Sivas Yolu',
+  roadCanik: 'Canik Dağı Yolu', roadSungurlu: 'Sungurlu Yolu',
   stopKirikvadi: 'Kırıkvadi Dinlenme Tesisleri', stopHavza: 'Havza Akaryakıt', stopGokdere: 'Gökdere Tesisleri',
   stopBayat: 'Bayat Akaryakıt', stopMecitozu: 'Mecitözü Dinlenme Tesisi', stopSorgun: 'Sorgun Tesisleri',
+  stopCakiralan: 'Çakıralan Tesisi', stopOsmancik: 'Osmancık Dinlenme Tesisi',
   stopYildizeli: 'Yıldızeli Dinlenme Tesisi', stopSivasServis: 'Sivas Ağır Vasıta Servisi',
   jobCement: 'Yıldızeli çimento fabrikasından Amasya deposuna torbalı çimento.', jobTextilePort: 'Tokat tekstilini limandan ihracata yetiştir.',
   jobFoodTokat: 'Çorum gıda fabrikasından Tokat lojistiğine koliler.', jobContainer: 'Limandan indirilen konteynerleri Çorum fabrikasına taşı.',
   jobGrainPort: 'Yozgat buğdayını Samsun limanına ulaştır.', jobMachineSivas: 'Çorum makine fabrikasından Sivas sanayisine tezgâh.',
-  landmarkArrow: 'TARİHİ YAPI', roadStop: 'TESİS', restArea: 'DİNLENME ALANI',
+  rockTombs: 'HARŞENA KAYA MEZARLARI',
+  convoy: 'KONVOY', convoyAlone: 'boşta — diğer sekmeyi aç (K)', convoyKey: 'konvoy',
+  convoyOn: 'Konvoy bağlantısı açıldı — aynı tarayıcının diğer sekmeleri katılabilir.',
+  convoyOff: 'Konvoy bağlantısı kapandı.',
+  convoyPeer: '{name} konvoya katıldı', convoyPeerLeft: '{name} konvoydan ayrıldı',
+  convoyOffer: '{name} bir iş paylaştı: {title}', convoyHaul: '{name} {cargo} teslimatını bitirdi (+{reward})',
+  convoyHaulFail: '{name} {cargo} teslimatını yapamadı', convoyFull: 'Konvoy dolu ({max} rig)', landmarkArrow: 'TARİHİ YAPI', roadStop: 'TESİS', restArea: 'DİNLENME ALANI',
+  /* --- ALOSKE / ALOSKEGANG live layer + community depot --- */
+  aloskegangDepot: 'ALOSKEGANG Topluluk Deposu', aloskegangShort: 'ALOSKEGANG Deposu',
+  aloskegangGarage: 'TOPLULUK GARAJI', aloskegangFuel: 'TOPLULUK AKARYAKITI',
+  aloskegangMeetup: 'ALOSKEGANG|BULUŞMA ALANI', aloskegangMarkSub: 'TOPLULUK YOLU',
+  aloskegangMeet: 'BULUŞMAYI AÇ', aloskegangMeetPrompt: 'Topluluk buluşması: aracını park et, ekibi topla.',
+  aloskegangMet: 'ALOSKEGANG buluşması başladı. {count} sürücü bağlı.',
+  aloskegangWeigh: 'Kantar okuması: {weight} t. Kontrol ücreti: {fee}', aloskegangWeighGo: 'KANTAR: yükü tart', aloskegangWeighEmpty: 'Kantara yük olmadan çıkma.',
+  aloskegangBoard: 'TOPLULUK İŞ PANOSU', streamerTitle: 'CANLI KATMAN', streamerOn: 'YAYIN KATMANI',
+  streamerOff: 'KAPALI', streamerViewers: 'İZLEYİCİ', streamerSession: 'YAYIN SÜRESİ', streamerProvider: 'SAĞLAYICI',
+  streamerDeliveries: 'TESLİMAT', streamerCrashes: 'KAZA', streamerMeets: 'BULUŞMA', streamerRadar: 'RADAR', streamerDiscoveries: 'KEŞİF',
+  streamerNoFacts: 'Henüz yayın olayı yok.', streamerEnabled: 'Yayın katmanı açıldı (F4).', streamerDisabled: 'Yayın katmanı kapatıldı.',
+  cargoGlass: 'CAM ÜRÜNLER', cargoFuel: 'AKARYAKIT', jobGlassTokat: 'Kırılabilir cam yükü: park etmeden indirme yok.', jobFuelSivas: 'Akaryakıt sevkiyatı: sert temas tehlikeli.', riskFragile: 'KIRILGAN', riskHazmat: 'TEHLİKELİ', riskNormal: 'NORMAL', reroll: 'PİYASAYI YENİLE', rerollWait: 'Piyasa {n} sn içinde yenilenir.',
+  navLeft: 'SOLA DÖN', navRight: 'SAĞA DÖN', navStraight: 'YOLA DÜZ DEVAM', navArrive: 'TESLİM NOKTASI', navIn: '{dist} sonra', navArriveNow: 'varsın',
+  keyRadio: 'radyo', keyStreamer: 'yayın katmanı', radioStation: 'RADYO ALOSKE 103.6 · hicaz', radar: 'RADAR KONTROLÜ', speedingFine: '{limit} km/h sınırını aştın ({kmh}): {fine}', speedingWarn: 'HIZ SINIRINI AŞIYORSUN',
+  bridgeBollard: 'KÖPRÜ', discoveryTitle: 'KEŞİF LİSTESİ', discoveryCount: '{n}/{t} bölge keşfedildi', discoveryNew: 'Listeye eklendi: {location}',
+  netTitle: 'ÇOK OYUNCULU', netOff: 'KAPALI', netLocal: 'YEREL OTURUM', netHost: 'EV SAHİBİ', netJoin: 'KATIL',
+  netLeave: 'AYRIL', netPlayers: 'SÜRÜCÜLER', netNoPeers: 'Başka sürücü yok. Aynı tarayıcıda ikinci sekme aç ve KATIL de.',
+  netStatus: 'DURUM', netPeer: 'uzak sürücü', eta: 'VARIŞ', etaArrive: '{time} (tahmini)', nextJunction: 'SONRAKİ',
+  jobDeadline: 'SON TESLİM', jobLate: 'İş gecikti: {cost} kesinti.', jobExpired: 'İş süresi doldu: {cargo}',
+  jobFailedCargo: 'YÜK KULLANILAMAZ! Teslimat reddedildi.', jobArrived: 'Teslimat yerine vardın.',
+  startHasSave: 'Kayıtlı oturum bulundu: para, seviye, konum ve yük olduğu yerden devam eder.', timeLeft: 'SON TESLİM', onTime: 'Zamanında teslim', lateFor: '{n} dk gecikme', onTimeBonus: 'Erken teslimat primi', latePenalty: 'Gecikme cezası', lateForLabel: 'Gecikmeli teslim',
+  saveWrittenTo: 'Kayıt yazıldı', continueGame: 'KALDIĞINDAN DEVAM', newGameHint: 'Yeni oyun: ilerleme ve konum sıfırlanır.',
+  saveLoaded: 'Kayıt yüklendi: {money}, SV {level}', saveNone: 'Kayıtlı oyun yok.', saveReset: 'Kayıt silindi. Yeni başlangıç.',
+  loadedFromSave: 'Yük kasadan geri yüklendi.', saveWritten: 'Oyun kaydedildi.', saveNoJob: 'kayıtta aktif iş yok',
+  newGame: 'YENİ OYUN', loadGame: 'KAYDI YÜKLE', resetSave: 'KAYDI SİL', saveNow: 'ŞİMDİ KAYDET', saveTitle: 'OYUN KAYDI', saveWorldMismatch: 'Kayıt farklı bir dünya sürümünden geldi; konum güvenli alandan başlatıldı.',
+  garageService: 'Servis gerekli: hasar %{damage}', smokeWarn: 'Duman var! En yakın servise git.',
 } as const;
 
 export type TextKey = keyof typeof tr;
@@ -123,18 +157,28 @@ export const number = (value: number, digits = 0) => new Intl.NumberFormat('tr-T
 }).format(Number.isFinite(value) ? value : 0);
 export const money = (value: number, digits = 0) => `₺${number(value, digits)}`;
 export const distance = (meters: number) => meters >= 1000 ? `${number(meters / 1000, 1)} km` : `${number(meters)} m`;
+/** "1s 05dk" / "42dk" — durations for the dispatch board and the deadline chip. */
+export const dur = (min: number) => {
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  return h > 0 ? `${h}s ${String(m % 60).padStart(2, '0')}dk` : `${m}dk`;
+};
+
 export const upper = (value: string) => value.toLocaleUpperCase('tr-TR');
 export const gradeName = (grade: string) => tr[grade as TextKey] ?? grade;
 export const eventName: Record<string, string> = {
+  COMMUNITY_EVENT: 'Topluluk etkinliği', JOB_EXPIRED: 'İş süresi doldu', SPEEDING: 'Radar cezası',
   PLAYER_CRASHED: 'Araç çarpışması', DELIVERY_ACCEPTED: 'İş kabul edildi', CARGO_LOADED: 'Yük alındı',
   DELIVERY_COMPLETED: 'Teslimat tamamlandı', DELIVERY_FAILED: 'Teslimat başarısız', FUEL_LOW: 'Yakıt az', FUEL_EMPTY: 'Yakıt bitti',
   REFUELED: 'Yakıt alındı', TRUCK_REPAIRED: 'Araç tamir edildi', PARKING_SUCCESS: 'Park başarılı', PARKING_FAILED: 'Park başarısız',
   NEW_LOCATION_DISCOVERED: 'Yeni konum', TRAFFIC_ACCIDENT: 'Trafik kazası', WEATHER_CHANGED: 'Hava değişti',
   LEVEL_UP: 'Seviye atlandı', TRUCK_ENTERED: 'Kabine geçildi', TRUCK_EXITED: 'Araçtan inildi',
+  PEER_JOINED: 'Konvoya katıldı', PEER_LEFT: 'Konvoydan ayrıldı', CONVOY_HAUL: 'Konvoy teslimatı',
 };
 export const controls: [string, string][] = [
   ['W / S', tr.keyThrottle], ['A / D', tr.keySteer], [tr.space, tr.keyBrake], ['C', tr.keyCamera],
   ['F', tr.keyEnter], ['E', tr.keyUse], ['J', tr.keyJobs], ['M', tr.keyMap], ['L', tr.keyLights],
   ['Z / X / B', tr.keyIndicators], ['V', tr.keyWipers], ['H', tr.keyHorn], ['T', tr.keyWeather], ['R', tr.keyRecovery],
+  ['N', tr.keyRadio], ['F4', tr.keyStreamer], ['K', tr.convoyKey],
   [tr.mouse, tr.keyLook], ['F3', tr.keyDebug], ['NUM 8 / 2', tr.keyHeight], ['NUM 4 / 6', tr.keyHead],
 ];

@@ -17,6 +17,7 @@ import { groundHeight, initRoadProfile } from './elevation';
 import { extendRegionalNetwork, buildRegionalSettlements, localizeCoreLocations, ServiceLocation, loadingMark } from './regionalWorld';
 import { buildRoadside } from './roadside';
 import { extendExpansionNetwork, buildExpansion } from './regionalExpansion';
+import { buildAloskeGang } from './aloskegang';
 
 export interface Location {
   id: string; name: string; short: string; x: number; z: number; heading: number;
@@ -546,6 +547,9 @@ export function buildWorld(): World {
 
   const regional = buildRegionalSettlements(c, root, g, regionalNetwork.corridors);
   const expansion = buildExpansion(c, g);
+  // ALOSKEGANG community depot: same accumulator, so it lands in locations/services/
+  // pumps/pois through the existing merge below.
+  buildAloskeGang(c, g, expansion);
   // Roadside services and corridor villages — built from the same graph the
   // traffic and the GPS use, so every sign points at something drivable.
   const roadside = buildRoadside(c, g);

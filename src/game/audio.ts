@@ -36,6 +36,17 @@ export class GameAudio {
 
   private noiseBuffer!: AudioBuffer;
 
+  // Tyre / road contact layer (synthesised noise, no samples)
+  private roadGain!: GainNode;
+  private roadFilter!: BiquadFilterNode;
+  // Cab radio: a generated slow modal bed, never a recording
+  private radioGain!: GainNode;
+  private radioFilter!: BiquadFilterNode;
+  private radioVoices: OscillatorNode[] = [];
+  radioOn = false;
+  private chordI = 0;
+  private chordT = 0;
+
   start() {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -207,6 +218,46 @@ export class GameAudio {
       this.hornGain.connect(this.master);
       this.horn1.start();
       this.horn2.start();
+
+      /* ------------------------------------------------------------- */
+      /* 6. TYRE / ROAD CONTACT (band of filtered noise, speed driven)  */
+      /* ------------------------------------------------------------- */
+      const roadSrc = ctx.createBufferSource();
+      roadSrc.buffer = this.noiseBuffer;
+      roadSrc.loop = true;
+      this.roadFilter = ctx.createBiquadFilter();
+      this.roadFilter.type = 'bandpass';
+      this.roadFilter.frequency.value = 620;
+      this.roadFilter.Q.value = 0.5;
+      this.roadGain = ctx.createGain();
+      this.roadGain.gain.value = 0;
+      roadSrc.connect(this.roadFilter);
+      this.roadFilter.connect(this.roadGain);
+      this.roadGain.connect(this.master);
+      roadSrc.start();
+
+      /* ------------------------------------------------------------- */
+      /* 7. CAB RADIO — generated modal bed (D hicaz), three voices     */
+      /*    plus a low hiss so it never reads as a silent checkbox.     */
+      /* ------------------------------------------------------------- */
+      this.radioFilter = ctx.createBiquadFilter();
+      this.radioFilter.type = 'lowpass';
+      this.radioFilter.frequency.value = 1450;
+      this.radioFilter.Q.value = 0.8;
+      this.radioGain = ctx.createGain();
+      this.radioGain.gain.value = 0;
+      this.radioFilter.connect(this.radioGain);
+      this.radioGain.connect(this.master);
+      for (let i = 0; i < 3; i++) {
+        const o = ctx.createOscillator();
+        o.type = i === 0 ? 'triangle' : 'sine';
+        o.frequency.value = 146.83;
+        const g = ctx.createGain();
+        g.gain.value = i === 0 ? 0.5 : 0.3;
+        o.connect(g); g.connect(this.radioFilter);
+        o.start();
+        this.radioVoices.push(o);
+      }
     } catch (e) {
       console.warn('WebAudio init failed', e);
       this.ctx = null;
@@ -214,15 +265,21 @@ export class GameAudio {
   }
 
   update(rpm: number, throttle: number, speedMs: number, rain: number, engineOn: boolean, inCab: boolean, horn: boolean,
-    gear = 1, acceleration = 0, brake = 0, shiftTimer = 0) {
+    gear = 1, acceleration = 0, brake = 0, shiftTimer = 0, dt = 1 / 60) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const dtOf = (now: number) => { void now; return Math.max(0.001, Math.min(0.2, dt)); };
     throttle = Math.max(0, Math.min(1, Number.isFinite(throttle) ? throttle : 0));
     if (engineOn && gear !== this.previousGear && t - this.lastShiftAt > 0.3) {
       this.lastShiftAt = t;
       this.airRelease(0.022, 190, 0.1);
     }
     if (engineOn && this.previousBrake > 0.18 && brake <= 0.18 && speedMs < 8) this.airRelease(0.055, 900, 0.22);
+    /* road roar: rises with speed, duller and louder on wet asphalt, absent at a standstill */
+    const sp = Math.min(1, Math.abs(speedMs) / 22);
+    this.roadGain.gain.setTargetAtTime(Math.pow(sp, 1.35) * (inCab ? 0.075 : 0.05) * (1 + rain * 0.5), t, 0.18);
+    this.roadFilter.frequency.setTargetAtTime(520 + sp * 640 + rain * 260, t, 0.25);
+    if (this.radioOn) this.advanceRadio(dtOf(t));
     this.previousGear = gear; this.previousBrake = brake;
 
     /* ------------------------------------------------------------- */
@@ -308,6 +365,49 @@ export class GameAudio {
     src.connect(filter); filter.connect(gain); gain.connect(this.master);
     src.onended = () => { src.disconnect(); filter.disconnect(); gain.disconnect(); };
     src.start(); src.stop(ctx.currentTime + duration + 0.02);
+  }
+
+  /** D.200-flavoured radio: a slow modal progression, one chord every 9 s. */
+  private advanceRadio(dt: number) {
+    if (!this.ctx) return;
+    this.chordT += dt;
+    if (this.chordT < 9) return;
+    this.chordT = 0;
+    this.chordI = (this.chordI + 1) % 4;
+    const roots = [0, 5, 7, 0];
+    // hicaz colouring: b2 and #4 over the root, with asuspending the last chord
+    const shapes = [[0, 1, 4], [0, 1, 8], [0, 4, 7], [0, 3, 7]];
+    const base = 146.83 * Math.pow(2, roots[this.chordI] / 12);
+    const shape = shapes[this.chordI];
+    const t = this.ctx.currentTime;
+    this.radioVoices.forEach((o, i) => {
+      const mul = i === 2 ? 2 : 1;
+      o.frequency.setTargetAtTime(base * mul * Math.pow(2, shape[Math.min(i, shape.length - 1)] / 12), t, 1.2);
+    });
+  }
+
+  setRadio(on: boolean) {
+    this.radioOn = on;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.radioGain.gain.setTargetAtTime(on ? 0.055 : 0, t, 0.5);
+    if (on) { this.chordT = 9; this.advanceRadio(0.02); }
+  }
+
+  /** short alarm tone (reverse buzzer, radar, warning lamps) */
+  beep(freq = 880, dur = 0.16, vol = 0.05, type: OscillatorType = 'square') {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.setValueAtTime(vol, t + dur * 0.7);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.02);
   }
 
   thud(intensity: number) {

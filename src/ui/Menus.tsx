@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useUI } from '../game/store';
 import { game } from '../game/Game';
 import { FullMap } from './MapView';
 import { eur } from './Hud';
-import { tr, controls, money, number, distance, upper, gradeName } from '../game/i18n';
+import { tr, t as t2, controls, money, number, distance, dur, upper, gradeName } from '../game/i18n';
+import { streamerState, describeProvider } from '../game/streamer';
 import { PROVINCE_BY_ID } from '../game/regions';
 
 const Overlay = ({ children, onClose }: { children: any; onClose?: () => void }) => (
@@ -19,6 +20,8 @@ const Overlay = ({ children, onClose }: { children: any; onClose?: () => void })
 /* ------------------------------ title / loading ------------------------------ */
 export function StartScreen() {
   const s = useUI();
+  const [resumable, setResumable] = useState(() => false);
+  useEffect(() => { if (game.ready) setResumable(game.hasSession()); }, [s.loading]);
   if (s.started) return null;
   return (
     <div className="ui-block px start-screen">
@@ -30,14 +33,19 @@ export function StartScreen() {
         <p className="start-intro">{tr.intro}</p>
         <div className="start-actions">
           <button className="btn primary start-button" disabled={s.loading} onClick={() => game.start()}>
-            {s.loading ? tr.loading : tr.start}<span aria-hidden="true">&rarr;</span>
+            {s.loading ? tr.loading : resumable ? tr.continueGame : tr.start}<span aria-hidden="true">&rarr;</span>
           </button>
+          {resumable && (
+            <button className="btn" disabled={s.loading} onClick={() => { game.start(); game.newGame(); }}>
+              {tr.newGame}
+            </button>
+          )}
           <details className="controls-disclosure">
             <summary className="btn">{tr.controls}</summary>
             <div className="panel controls-grid">{controls.map(([key, label]) => <div key={key}><kbd className="key">{key}</kbd><span>{label}</span></div>)}</div>
           </details>
         </div>
-        <p className="start-help">{s.loading ? s.loadText : tr.desktopNote}</p>
+        <p className="start-help">{s.loading ? s.loadText : resumable ? tr.startHasSave : tr.desktopNote}</p>
       </main>
       <footer className="start-footer"><span>{tr.scaleNote}</span><span>{tr.brand} / 02</span></footer>
       </div>
@@ -63,12 +71,17 @@ export function JobBoard() {
       <div className="panel amber job-board" style={{ width: 'min(1120px, 94vw)', maxHeight: '88vh', overflow: 'auto', padding: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="h1">{tr.dispatch}</div>
-          <button className="btn" onClick={() => game.closeMenu()}>{tr.close} (J)</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" disabled={!!s.job} onClick={() => game.rerollBoard()}>{tr.reroll}</button>
+            <button className="btn" onClick={() => game.closeMenu()}>{tr.close} (J)</button>
+          </div>
         </div>
         <div className="dim" style={{ marginBottom: 12 }}>{tr.jobHelp}</div>
         {s.job && (
           <div className="panel green" style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div><span style={{ color: '#44e08c' }}>{tr.active}:</span> {s.job.title} / {s.job.cargoName} &rarr; {w.locations[s.job.to].name}</div>
+            <div><span style={{ color: '#44e08c' }}>{tr.active}:</span> {s.job.title} / {s.job.cargoName} &rarr; {w.locations[s.job.to].name}
+              {s.deadlineTotalMin > 0 && <span className="dim"> · {tr.timeLeft} {dur(s.deadlineMin)}</span>}
+            </div>
             <button className="btn danger" onClick={() => { game.cancelJob(); }}>{tr.cancel}</button>
           </div>
         )}
@@ -96,6 +109,12 @@ export function JobBoard() {
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ color: '#9dffc0', fontSize: 30 }}>{eur(j.reward)}</div>
                   <div style={{ color: '#7fb4ff' }}>+{number(j.xp)} {tr.xp}</div>
+                  <div className="dim" style={{ fontSize: 16 }}>{tr.timeLeft} {dur(j.hours * 60)}</div>
+                  {j.risk && j.risk !== 'normal' && (
+                    <div style={{ fontSize: 15, color: j.risk === 'hazmat' ? '#ff8a70' : '#ffb030' }}>
+                      {j.risk === 'hazmat' ? tr.riskHazmat : tr.riskFragile}
+                    </div>
+                  )}
                 </div>
                 <button className="btn primary" disabled={!!s.job} onClick={() => game.acceptJob(j.id)}>{tr.accept}</button>
               </div>
@@ -122,7 +141,17 @@ export function MapModal() {
         <div className="dim" style={{ fontSize: 17, marginTop: 4 }}>
           <span style={{ color: '#66b4df' }}>■ {tr.fuelStation}</span> · <span style={{ color: '#eb7956' }}>■ {tr.service}</span> · <span style={{ color: '#ece2aa' }}>■ {tr.restSign}</span>
         </div>
-        {s.navTarget && <div style={{ fontSize: 20, color: '#a6ddaa', marginTop: 4 }}>{tr.destination}: {s.navTarget} / {distance(s.distRemain)}</div>}
+        {s.navTarget && <div style={{ fontSize: 20, color: '#a6ddaa', marginTop: 4 }}>{tr.destination}: {s.navTarget} / {distance(s.distRemain)}{s.etaText ? ` · ${tr.eta} ${s.etaText}` : ''}</div>}
+        <div className="panel" style={{ textAlign: 'left', fontSize: 16, maxWidth: 900, margin: '6px auto 0', padding: '4px 8px' }}>
+          <span style={{ color: '#ffb030' }}>{tr.discoveryTitle}</span>{' '}
+          <span className="dim">{t2('discoveryCount', { n: (s.discoveries || []).length, t: game.world.pois.length })}</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 2 }}>
+            {game.world.pois.map((p: any) => {
+              const known = (s.discoveries || []).some((d: any) => d.id === p.id);
+              return <span key={p.id} style={{ color: known ? '#9dffc0' : '#5d6774' }}>{known ? p.name : '· · ·'}</span>;
+            })}
+          </div>
+        </div>
         <div className="dim" style={{ fontSize: 17 }}>{tr.scaleNote} / {tr.mapClose}</div>
         <button className="btn" style={{ marginTop: 8 }} onClick={() => game.closeMenu()}>{tr.close} (M)</button>
       </div>
@@ -156,6 +185,20 @@ export function PauseMenu() {
           <div><span className="dim">{tr.pixelSize} </span>
             {[[tr.fine, 1.5], [tr.normal, 2], [tr.chunky, 3]].map(([l, v]: any) => <button key={l} className={'btn ' + (s.pixel === v ? 'on' : '')} style={{ marginRight: 6, fontSize: 18 }} onClick={() => game.setPixel(v)}>{l}</button>)}
           </div>
+          <div><span className="dim">{tr.saveTitle ?? 'KAYIT'} </span>
+            <button className="btn" onClick={() => game.manualSave()}>{tr.saveNow}</button>{' '}
+            <button className="btn danger" onClick={() => { game.resetSave(); game.closeMenu(); }}>{tr.resetSave}</button>
+            <span className="dim" style={{ fontSize: 15, marginLeft: 6 }}>
+              {s.savedAt ? new Date(s.savedAt).toLocaleString('tr-TR') : tr.saveNone}
+              {' · '}{(s.discoveries || []).length}/{game.world.pois.length} {tr.discoveryCount.split('{')[0].trim().toLowerCase()}
+            </span>
+          </div>
+          <div><span className="dim">{tr.streamerTitle} </span>
+            <button className={'btn ' + (s.streamerOn ? 'on' : '')} onClick={() => game.setStreamer(!s.streamerOn)}>{tr.streamerOn} (F4)</button>{' '}
+            <button className={'btn ' + (s.streamerOn && streamerState.provider.kind === 'mock' ? 'on' : '')} onClick={() => game.setStreamerProvider('mock')}>{tr.streamerProvider}: YEREL</button>{' '}
+            <button className={'btn ' + (s.streamerOn && streamerState.provider.kind === 'kick' ? 'on' : '')} onClick={() => game.setStreamerProvider('kick')}>KICK</button>
+            <div className="dim" style={{ fontSize: 15, marginTop: 3 }}>{describeProvider()}</div>
+          </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn" disabled={s.mode !== 'cab'} onClick={() => { game.closeMenu(); game.recover(false); }}>{tr.recovery} ({money(250)})</button>
             <button className="btn" onClick={() => game.toggleMute()}>{game.audio.muted ? tr.soundOff : tr.soundOn}</button>
@@ -187,6 +230,10 @@ export function Completion() {
           <span className="dim">{tr.basePay}</span><span>{eur(c.base)}</span>
           <span className="dim">{tr.cargoDamage}</span><span>{c.damage > 0 ? `%${c.damage} (%${c.penalty} ${tr.payPenalty})` : tr.none}</span>
           <span className="dim">{tr.manoeuvre}</span><span>{c.contact ? tr.contact : tr.clean}</span>
+          <span className="dim">{tr.timeLeft}</span>
+          <span style={{ color: c.onTime ? '#9dffc0' : '#ff8a70' }}>
+            {c.onTime ? (c.timeBonus > 0 ? `${tr.onTime} (+%${c.timeBonus})` : tr.onTime) : `${tr.lateForLabel} (−%${Math.max(0, -c.timeBonus)})`}
+          </span>
         </div>
         <button className="btn primary" style={{ marginTop: 12, fontSize: 28 }} onClick={() => game.dismissCompletion()}>{tr.continue}</button>
       </div>

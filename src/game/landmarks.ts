@@ -3,7 +3,7 @@ import { Ctx, tree, bench, bin, pallet, containerStack, silo, fenceLine, parkedC
 import { M, extra, labelMaterial } from './textures';
 import { groundHeight } from './elevation';
 import { tr, upper } from './i18n';
-import { board, flagPole } from './turkishProps';
+import { board, flagPole, mosque } from './turkishProps';
 import { CITY_PROFILES } from './regions';
 
 /**
@@ -93,6 +93,69 @@ export function clockTower(c: Ctx, x: number, z: number) {
 /* ================================================================== */
 /*  TOKAT — kale                                                      */
 /* ================================================================== */
+/**
+ * Amasya — Harşena kayalıkları: the Pontic rock tombs cut into the cliff above the
+ * Yeşilırmak, with the fortress wall along the rim. It is deliberately a *vertical*
+ * landmark: it stands over the city instead of occupying the street, so it can be
+ * seen from the valley road without narrowing anything.
+ */
+export function kingTombs(c: Ctx, x: number, z: number, scale = 1) {
+  const { B, D } = c;
+  const s = scale;
+  const base = groundHeight(x, z);
+  const W = 40 * s, DEPTH = 15 * s, H = 26 * s;
+  const face = z + DEPTH / 2;
+  const ROCK = [0x7c6e57, 0x8a7b62, 0x746753, 0x93836a];
+  // the cliff itself: four setback tiers of weathered limestone, each with its own
+  // strata seam, so the face never reads as one flat wall from the road below
+  for (let i = 0; i < 4; i++) {
+    const t = i / 3;
+    const w = W * (1 - t * 0.22), h = H / 4;
+    const y = base + i * h;
+    B.box(w, h, DEPTH * (1 - t * 0.3), i === 0 ? M.brick : M.concrete, x, y + h / 2, z - t * 2.2 * s, ROCK[i], { tu: 8, tv: 4 });
+    B.box(w + 0.3, 0.34 * s, 0.5, M.concrete, x, y + h - 0.17 * s, face - t * 2.2 * s, 0x5f5443);
+    // weathered shelf of fallen rock under each ledge — the thing that sells a sea of rock
+    if (i > 0) for (let k = 0; k < 6; k++)
+      D.box(1.5 * s + (k % 3) * 0.5, 0.5 * s, 1.1 * s, M.concrete, x - w / 2 + (k + 0.5) * (w / 6), y + 0.2 * s, face + 0.9 * s, 0x83755e);
+    for (let k = 0; k < 5; k++) {
+      const fx = x - w / 2 + (k + 0.5) * (w / 5);
+      B.box(0.34 * s, h * (0.42 + (k % 3) * 0.16), 0.36, M.concrete, fx, y + h * 0.52, face - t * 2.2 * s + 0.05, 0x655a48);
+    }
+  }
+  B.colBox(W, DEPTH, x, z, 0, 'cliff');
+  c.foot.push({ x, z, w: W + 4, d: DEPTH + 6, ry: 0, kind: 'landmark' });
+  // tombs: recessed facades with two side pilasters and a lintel
+  for (let i = 0; i < 5; i++) {
+    const tx = x - 15.2 * s + i * 7.6 * s, ty = base + 8.6 * s + (i % 2) * 5.4 * s;
+    // the carved porch, the dark cell mouth, the two side pilasters and the lintel
+    B.box(5.0 * s, 6.0 * s, 0.8 * s, M.concrete, tx, ty, face - 0.1 * s, 0xb7a888, { tu: 3 });
+    B.box(3.3 * s, 4.4 * s, 0.5 * s, M.plaster, tx, ty - 0.5 * s, face + 0.55 * s, 0x1e1c19);
+    for (const side of [-1, 1]) B.box(0.6 * s, 6.2 * s, 0.6 * s, M.concrete, tx + side * 2.5 * s, ty, face + 0.2, 0xcdbfa1);
+    B.box(5.6 * s, 0.7 * s, 0.8 * s, M.concrete, tx, ty + 3.4 * s, face + 0.1, 0xd8cbae);
+  }
+  // the upper gate and the wall along the rim
+  B.box(W * 0.94, 2.4 * s, 1.1 * s, M.brick, x, base + H + 1.2 * s, face - 1.2 * s, STONE, { tu: 8 });
+  crenelsX(c, x - W * 0.44, x + W * 0.44, base + H + 2.4 * s, face - 1.2 * s, 1.5 * s);
+  for (const side of [-1, 1]) {
+    const ax = x + side * W * 0.42;
+    B.cyl(2.3 * s, 2.6 * s, 7.6 * s, 10, M.brick, ax, base + H + 1.6 * s, face - 2.6 * s, STONE_L, { tu: 3 });
+    B.cyl(0.0, 2.8 * s, 2.1 * s, 10, M.roofMetal, ax, base + H + 9.2 * s, face - 2.6 * s, 0x6d5347);
+    c.B.colCircle(2.6 * s, ax, face - 2.6 * s, 'tower');
+  }
+  // stepped path cut into the rock face
+  for (let i = 0; i < 9; i++)
+    D.box(0.7 * s, 0.18 * s, 0.5 * s, M.concrete, x + 8.4 * s + (i % 3) * 0.4, base + 3.4 * s + i * 1.5 * s, face + 0.2, 0xbfae90);
+  // cave mosque at the foot, plus the rubble apron
+  mosque(c, x - 9 * s, face + 8 * s, 0);
+  for (let i = 0; i < 10; i++) {
+    const rx = x - W / 2 + (i * 3.4) % W, rz = face + 1.6 + (i % 3) * 1.1;
+    D.box(0.9 + (i % 4) * 0.3, 0.5, 0.8, M.concrete, rx, base + 0.25, rz, 0x9c917c);
+  }
+  board(c, x, face + 11 * s, Math.PI, `${upper(tr.amasya)}|${tr.rockTombs}`, 5.4, 1.5, 2.6, 'tourism');
+  for (let i = 0; i < 4; i++) tree(c, 'bush', x - 20 * s + i * 13 * s, face + 15 * s, 1.1, false);
+  ground(c, x, z);
+}
+
 export function castle(c: Ctx, x: number, z: number, scale = 1) {
   const { B, D } = c;
   const s = scale;
@@ -586,6 +649,7 @@ export function buildCityLandmark(c: Ctx, cityId: string, x: number, z: number, 
       case 'medrese': { const [px, pz] = at(0); medrese(c, px, pz); break; }
       case 'sugarFactory': { const [px, pz] = at(0); sugarFactory(c, px, pz); break; }
       case 'stoneBridge': { const [px, pz] = at(1); stoneBridge(c, px, pz); break; }
+      case 'rockTombs': { const [px, pz] = at(0); kingTombs(c, px, pz); break; }
       default: break;
     }
   }

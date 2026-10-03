@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "probe": "node tools/probe.mjs http://127.0.0.1:5173/ --drive=8",
     "shots": "node tools/shots.mjs",
-    "setup:chromium": "node tools/setup-chromium.mjs"
+    "setup:chromium": "node tools/setup-chromium.mjs",
+    "convoy-check": "node tools/convoy-check.mjs",
+    "convoy:roster": "node tools/convoy-roster.mjs",
+    "perf": "node tools/perf-check.mjs"
   },
   "dependencies": {
     "@types/three": "^0.186.0",

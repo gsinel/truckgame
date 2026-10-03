@@ -332,8 +332,10 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
     const L = e.len;
     // Asphalt, shoulders and junctions are authored once in buildRoadSurface.
 
-    // markings
-    if (!e.bridge || true) {
+    /* Markings. The old `if (!e.bridge || true)` guard was dead code: a deck does keep
+       its lane paint, it simply has no painted edge line — the kerb and parapet take
+       over that job (built in terrain.ts, together with the deck colliders). */
+    {
       const s0 = ta, s1 = L - tb;
       if (s1 > s0 + 1) {
         if (e.type === 'highway') {
@@ -341,16 +343,20 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
           strip(e, 0.2, 0.35, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
           dashed(e, 3.5, 0.08, s0, s1, 3, 6, WHITE);
           dashed(e, -3.5, 0.08, s0, s1, 3, 6, WHITE);
-          strip(e, hw - 0.5, hw - 0.35, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
-          strip(e, -hw + 0.35, -hw + 0.5, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+          if (!e.bridge) {
+            strip(e, hw - 0.5, hw - 0.35, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+            strip(e, -hw + 0.35, -hw + 0.5, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+          }
         } else if (e.type === 'town') {
           dashed(e, 0, 0.08, s0, s1, 3, 6, WHITE);
           strip(e, hw - 2.1, hw - 1.96, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
           strip(e, -hw + 1.96, -hw + 2.1, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
         } else if (e.type === 'rural') {
           dashed(e, 0, 0.08, s0, s1, 3, 9, WHITE);
-          strip(e, hw - 0.4, hw - 0.27, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
-          strip(e, -hw + 0.27, -hw + 0.4, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+          if (!e.bridge) {
+            strip(e, hw - 0.4, hw - 0.27, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+            strip(e, -hw + 0.27, -hw + 0.4, Y_MARK, s0, s1, M.markWhite, WHITE, 4, 3);
+          }
         } else if (e.type === 'village' || e.type === 'industrial') {
           dashed(e, 0, 0.08, s0, s1, 3, 6, WHITE);
         } else if (e.type === 'ring') {
@@ -373,8 +379,27 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
       }
     }
 
+    /* Village streets: a single-side paving band. Village edges are narrower and the
+       houses sit closer than in a town, so they get one flat walk (no kerb face, no
+       collider) instead of the town's raised pair — that is what makes a village read
+       differently from a town once you are outside the truck. */
+    if (e.type === 'village') {
+      const sa = g.sample(e, 1);
+      const side = (e.id % 2) * 2 - 1;
+      const cl = side * hw;
+      const x0 = e.a.edges.length >= 3 ? e.a.R + 1 : 0, x1 = L - (e.b.edges.length >= 3 ? e.b.R + 1 : 0);
+      if (x1 > x0 + 6) {
+        strip(e, Math.min(cl, cl + side * 1.5), Math.max(cl, cl + side * 1.5), Y_WALK - 0.02, x0, x1, M.pavementRaised, 0xffffff, 4, 4);
+        strip(e, Math.min(cl, cl + side * 0.14), Math.max(cl, cl + side * 0.14), Y_WALK, x0, x1, M.kerb, 0xd8d8d0, 2, 4);
+        for (let s = x0 + 6; s < x1 - 4; s += 34) {
+          const st = g.station(e, s);
+          const px = st.x + st.rx * (side * (hw + 2.2)), pz = st.z + st.rz * (side * (hw + 2.2));
+          D.box(0.12, 0.5, 0.12, M.metal, px, groundHeight(px, pz) + 0.25, pz, 0x9a9ea2, { tu: 1 });
+        }
+      }
+    }
     /* sidewalks (town) */
-    if (e.type === 'town' || (e.type === 'village' && false)) {
+    if (e.type === 'town') {
       const crossHalf = 5.5;
       const endTrim = (node: RNode, dirDx: number, dirDz: number) => {
         if (node.edges.length < 2) return 0;
@@ -440,6 +465,21 @@ export function buildRoads(g: RoadGraph, B: Batcher, D: Batcher, GL: Batcher): R
         if (e.a.edges.length >= 3 && s < e.a.R + 8) continue;
         if (e.b.edges.length >= 3 && s > L - e.b.R - 8) continue;
         lamp(st.x + st.rx * off, st.z + st.rz * off, -st.rx * side, -st.rz * side, false);
+      }
+    }
+    /* Deck transitions: limit signs live on the approach edges (a sign post cannot stand
+       on the span), but the abutments get reflective bollards so the entry reads at night. */
+    if (e.bridge && L > 24) {
+      for (const [s0, dir] of [[ta + 1.6, 1], [L - tb - 1.6, -1]] as [number, number][]) {
+        for (const side of [-1, 1]) {
+          const st = g.station(e, s0);
+          const off = side * (roadHalfWidth(e, s0) + 0.42);
+          const x = st.x + st.rx * off, z = st.z + st.rz * off;
+          const y = groundHeight(x, z);
+          D.box(0.13, 0.72, 0.13, M.metal, x, y + 0.36, z, 0xd8d8d0, { tu: 1 });
+          D.box(0.15, 0.2, 0.15, M.hazard, x, y + 0.62, z, 0xffffff);
+          void dir;
+        }
       }
     }
     /* speed limit signs */

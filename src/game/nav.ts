@@ -2,6 +2,15 @@ import { RoadGraph, REdge, RNode } from './roads';
 
 export interface Route { pts: { x: number; z: number }[]; length: number }
 
+/** Turn-by-turn hint derived from the planned polyline only — no extra world state. */
+export interface Guidance {
+  dir: 'left' | 'right' | 'straight' | 'arrive';
+  /** metres to the manoeuvre point, 0 when the destination is the next thing */
+  dist: number;
+  remain: number;
+  etaMin: number;
+}
+
 /** Dijkstra route planner on the road graph (respects one-way roundabouts). */
 export class Navigator {
   constructor(private g: RoadGraph) {}
@@ -74,6 +83,54 @@ export class Navigator {
     length = 0;
     for (let i = 1; i < pts.length; i++) length += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
     return { pts, length };
+  }
+
+  /**
+   * Walk the polyline forward from the vehicle, looking for the next meaningful heading
+   * change. This is deliberately geometry-based: it works for every route the planner
+   * can produce, including ones through the expansion, without a separate sign dataset.
+   */
+  static guidance(route: Route, x: number, z: number, avgKmh = 46, lookahead = 900): Guidance {
+    const pts = route.pts;
+    if (pts.length < 2) return { dir: 'arrive', dist: 0, remain: 0, etaMin: 0 };
+    let best = Infinity, idx = 0, tAt = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i], q = pts[i + 1];
+      const vx = q.x - p.x, vz = q.z - p.z;
+      const l2 = vx * vx + vz * vz || 1;
+      const t = Math.max(0, Math.min(1, ((x - p.x) * vx + (z - p.z) * vz) / l2));
+      const d = Math.hypot(p.x + vx * t - x, p.z + vz * t - z);
+      if (d < best) { best = d; idx = i; tAt = t; }
+    }
+    const seg = (i: number) => {
+      const p = pts[i], q = pts[Math.min(i + 1, pts.length - 1)];
+      return { vx: q.x - p.x, vz: q.z - p.z, len: Math.hypot(q.x - p.x, q.z - p.z) };
+    };
+    let remain = 0;
+    for (let i = idx; i < pts.length - 1; i++) {
+      const s = seg(i);
+      remain += s.len * (i === idx ? 1 - tAt : 1);
+    }
+    const cur = seg(idx);
+    const clen = Math.max(0.001, cur.len * (1 - tAt));
+    const chx = cur.vx / Math.max(0.001, cur.len), chz = cur.vz / Math.max(0.001, cur.len);
+    let walked = clen, turnDist = 0;
+    for (let i = idx + 1; i < pts.length - 1; i++) {
+      const s = seg(i);
+      if (s.len < 0.2) { walked += s.len; turnDist += s.len; continue; }
+      const hx = s.vx / s.len, hz = s.vz / s.len;
+      const dot = Math.max(-1, Math.min(1, chx * hx + chz * hz));
+      const ang = Math.acos(dot);
+      if (ang > 0.42) {
+        const cross = chx * hz - chz * hx;   // > 0 -> the path bends to the left
+        return { dir: turnDist > 42 ? (cross > 0 ? 'left' : 'right') : 'straight', dist: Math.round(turnDist), remain: walked + remain - turnDist, etaMin: remain / 1000 / Math.max(6, avgKmh) * 60 };
+      }
+      turnDist += s.len;
+      walked += s.len;
+      if (turnDist > lookahead) break;
+    }
+    const arrive = remain < 90;
+    return { dir: arrive ? 'arrive' : 'straight', dist: arrive ? 0 : Math.round(remain), remain, etaMin: remain / 1000 / Math.max(6, avgKmh) * 60 };
   }
 
   /** distance remaining along a route given the player's position */
