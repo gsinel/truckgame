@@ -128,3 +128,48 @@ input[type='range'] { accent-color: var(--amber); width: 240px; }
   .start-footer { position: relative; left: auto; right: auto; margin: 20px 30px; bottom: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .start-content, .toast, .pop, .blink { animation: none; } }
+
+/* ---------- phone viewports ----------
+   Only matches hand-held sizes, so the desktop layout above is untouched.
+   Portrait phones: centre the block, scale the wordmark to the viewport, keep the
+   footer in flow so it cannot collide with the help line. Landscape phones: same
+   content on a much shorter vertical budget. */
+@media (max-width: 560px) {
+  .start-screen { display: flex; flex-direction: column; justify-content: center; }
+  .start-header { top: 16px; left: 20px; right: 20px; font-size: 15px; gap: 10px; }
+  .brand-mark { font-size: 25px; }
+  .phase-tag { font-size: 12px; }
+  .start-content { margin: 0 20px; padding: 48px 0 30px; max-width: none; }
+  .start-eyebrow { font-size: 14px; letter-spacing: 3px; margin-bottom: 10px; }
+  .start-brand { font-size: clamp(46px, 14.5vw, 76px); }
+  .start-brand > span { margin-top: 8px; gap: 8px; letter-spacing: 6px; }
+  .start-brand i { width: 44px; }
+  .start-tagline { font-size: 23px; margin: 18px 0 6px; }
+  .start-intro { font-size: 18px; max-width: none; margin-bottom: 20px; }
+  .start-button { font-size: 23px !important; gap: 34px; }
+  .start-help { font-size: 14px; margin-top: 14px; max-width: none; }
+  .start-footer { position: static; margin: 0 20px 18px; padding-top: 10px; font-size: 13px; gap: 14px; }
+  .controls-grid { left: -6px; width: calc(100vw - 40px); font-size: 17px; max-height: 58vh; overflow: auto; grid-template-columns: 1fr; }
+  .controls-grid .key { white-space: normal; }
+  .hud-hints { display: none; }
+}
+@media (orientation: landscape) and (max-height: 480px) {
+  .start-screen { display: flex; flex-direction: column; justify-content: center; }
+  .start-header { top: 10px; left: 18px; right: 18px; font-size: 13px; gap: 8px; }
+  .brand-mark { font-size: 20px; padding: 2px 6px 3px; }
+  .phase-tag { font-size: 12px; }
+  .start-content { margin: 0 18px 0 clamp(18px, 6vw, 70px); padding: 26px 0 20px; max-width: min(560px, 62vw); }
+  .start-eyebrow { font-size: 12px; letter-spacing: 3px; margin-bottom: 6px; }
+  .start-brand { font-size: clamp(38px, 5.4vw, 58px); }
+  .start-brand > span { margin-top: 6px; gap: 8px; letter-spacing: 6px; }
+  .start-brand i { width: 34px; height: 3px; box-shadow: 0 5px 0 rgba(188,70,54,.2); }
+  .start-tagline { font-size: 17px; margin: 10px 0 4px; }
+  .start-intro { font-size: 13px; line-height: 1.3; margin-bottom: 10px; }
+  .start-actions { gap: 12px; }
+  .start-button { font-size: 19px !important; padding: 6px 14px !important; gap: 26px; }
+  .start-screen summary.btn { font-size: 15px; padding: 4px 0; }
+  .start-help { font-size: 12px; margin-top: 8px; }
+  .start-footer { display: none; }
+  .controls-grid { left: -6px; width: min(560px, 92vw); font-size: 13px; max-height: 62vh; gap: 5px 12px; padding: 10px; overflow: auto; }
+  .controls-grid .key { white-space: normal; }
+}
