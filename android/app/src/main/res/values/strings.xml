@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Arena AI</string>
+
+    <string name="channel_completions_name">Yanıt bildirimleri</string>
+    <string name="channel_completions_desc">Bir yanıt tamamlandığında bildirim gönderir</string>
+    <string name="channel_progress_name">İzleme durumu</string>
+    <string name="channel_progress_desc">Arka planda sürerken gösterilen kalıcı bildirim</string>
+
+    <string name="notification_reply_ready">Yanıtın hazır</string>
+    <string name="notification_reply_ready_sub">Arena AI cevabını tamamladı</string>
+    <string name="notification_watching">Arena AI izleniyor</string>
+    <string name="notification_watching_one">1 yanıt bekleniyor</string>
+    <string name="notification_watching_many">%1$d yanıt bekleniyor</string>
+    <string name="action_open_chat">Sohbete git</string>
+    <string name="action_reply">Yanıtla</string>
+    <string name="action_copy">Kopyala</string>
+    <string name="action_stop_watching">İzlemeyi durdur</string>
+    <string name="notification_reply_placeholder">Yeni prompt yaz</string>
+    <string name="notification_copied">Yanıt kopyalandı</string>
+    <string name="notification_queued">Arena AI açıldığında gönderilecek</string>
+    <string name="notification_nothing_detected">Bir tamamlanma yakalanamadı</string>
+    <string name="notification_nothing_detected_body">Akış görünmüyorsa Ayarlar → DOM izleyiciyi aç ya da manuel düğmeyi dene.</string>
+
+    <string name="shortcut_new_chat">Yeni sohbet</string>
+    <string name="shortcut_history">Bildirimler</string>
+</resources>

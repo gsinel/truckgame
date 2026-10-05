@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_chat"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_arena"
+        android:shortcutShortLabel="@string/shortcut_new_chat">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://arena.ai/chat"
+            android:targetClass="com.fanmade.arenaai.MainActivity"
+            android:targetPackage="com.fanmade.arenaai" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="history"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_arena"
+        android:shortcutShortLabel="@string/shortcut_history">
+        <intent
+            android:action="com.fanmade.arenaai.SHOW_HISTORY"
+            android:targetClass="com.fanmade.arenaai.MainActivity"
+            android:targetPackage="com.fanmade.arenaai" />
+    </shortcut>
+</shortcuts>
