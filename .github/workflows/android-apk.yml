@@ -7,11 +7,6 @@ on:
       - 'android/**'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
-    inputs:
-      release:
-        description: 'GitHub Release de oluşturulsun mu'
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -84,15 +79,28 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Release (opsiyonel)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release }}
+      - name: APK'ya okunabilir ad ver
+        if: success()
+        working-directory: android
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk arena-ai-fan.apk
+
+      - name: GitHub Release oluştur
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-v${{ github.run_number }}
-          name: "Arena AI (fan) v${{ github.run_number }}"
+          name: "Arena AI (fan) — derleme ${{ github.run_number }}"
           body: |
-            Fan-made Arena AI Android istemcisi — otomatik derleme.
-            Kurulum: APK'yı indir, telefonda "Bilinmeyen kaynak" iznini ver, kur.
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+            Arena AI fan-made Android istemcisi, otomatik derleme.
+
+            **Kurulum:** Telefonda bu sayfanın en altındaki `arena-ai-fan.apk` dosyasına dokun,
+            "bilinmeyen kaynak" iznini ver, kur. Güvenlik uyarısı çıkarsa "yine de kur" de
+            (imzalı olmayan debug derlemesi).
+
+            Gereksinim: Android 8.0+. İlk açılışta bildirim izni ver ve
+            Ayarlar → "Pil optimizasyonunu kapat".
+          files: android/arena-ai-fan.apk
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
