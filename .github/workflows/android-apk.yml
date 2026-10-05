@@ -18,6 +18,9 @@ jobs:
     name: Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
 
     steps:
       - name: Kaynağı al
@@ -72,6 +75,40 @@ jobs:
           path: android/gradle-build.log
           if-no-files-found: warn
           retention-days: 7
+
+      # Sandbox'ta Actions günlükleri indirilemediği için hata özetini commit yorumu olarak bırakır.
+      - name: Hata özetini commit yorumu yap
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          path = "android/gradle-build.log"
+          if not os.path.exists(path):
+              raise SystemExit(0)
+          lines = open(path, errors="replace").read().splitlines()
+          keywords = ("e: ", "error:", "FAILED", "What went wrong", "Caused by", "Execution failed", "> ")
+          summary = [l for l in lines if any(k in l for k in keywords)]
+          tail = lines[-150:]
+          body = (
+              "### Android derleme hatası (run " + os.environ.get("GITHUB_RUN_ID", "?") + ")\n\n"
+              "**Özet**\n```\n" + "\n".join(summary[-100:])[-20000:] + "\n```\n\n"
+              "**Son satırlar**\n```\n" + "\n".join(tail)[-25000:] + "\n```\n"
+          )
+          if len(body) > 60000:
+              body = body[-60000:]
+          with open("/tmp/comment.json", "w") as handle:
+              json.dump({"body": body}, handle)
+          repo = os.environ["GITHUB_REPOSITORY"]
+          sha = os.environ["GITHUB_SHA"]
+          subprocess.run(
+              ["gh", "api", "-X", "POST", f"repos/{repo}/commits/{sha}/comments", "--input", "/tmp/comment.json"],
+              check=False,
+          )
+          PY
 
       - name: APK'yı yükle
         uses: actions/upload-artifact@v4
