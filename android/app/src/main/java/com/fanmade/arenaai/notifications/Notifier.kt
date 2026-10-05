@@ -244,12 +244,10 @@ object Notifier {
         ).build()
     }
 
-    companion object {
-        fun copyToClipboard(context: Context, text: String) {
-            val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            manager?.setPrimaryClip(ClipData.newPlainText("arena-answer", text))
-            Toast.makeText(context, context.getString(R.string.notification_copied), Toast.LENGTH_SHORT).show()
-        }
+    fun copyToClipboard(context: Context, text: String) {
+        val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        manager?.setPrimaryClip(ClipData.newPlainText("arena-answer", text))
+        Toast.makeText(context, context.getString(R.string.notification_copied), Toast.LENGTH_SHORT).show()
     }
 }
 

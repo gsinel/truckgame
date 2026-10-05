@@ -2,6 +2,7 @@ package com.fanmade.arenaai.monitor
 
 import android.app.Application
 import com.fanmade.arenaai.data.Prefs
+import com.fanmade.arenaai.notifications.Notifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

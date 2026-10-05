@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.RemoteInput
+import com.fanmade.arenaai.R
 import com.fanmade.arenaai.data.Prefs
 import com.fanmade.arenaai.ui.UiEvents
 

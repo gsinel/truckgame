@@ -13,7 +13,9 @@ import android.os.Environment
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -241,9 +243,9 @@ class ArenaChromeClient(
         }
     }
 
-    override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+    override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
         val host = origin?.let { Uri.parse(it).host }
-        callback?.invoke(origin, isInternalHost(host), false)
+        callback.invoke(origin, isInternalHost(host), false)
     }
 }
 

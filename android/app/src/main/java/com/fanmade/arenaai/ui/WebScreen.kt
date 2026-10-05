@@ -152,7 +152,7 @@ fun WebScreen(
                 text = shortHost(webView.url ?: vm.currentUrl),
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
+                overflow = TextOverflow.Ellipsis,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

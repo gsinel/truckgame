@@ -21,6 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -75,7 +76,7 @@ fun HistoryScreen(
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(records, key = { it.id + it.finishedAt }) { record ->
+            items(items = records, key = { it.id + it.finishedAt }) { record ->
                 RecordCard(record = record, onClick = { onOpenChat(record.url) })
             }
         }
