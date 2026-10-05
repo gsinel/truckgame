@@ -41,6 +41,11 @@ object MonitorController {
 
     fun onStart(record: JobRecord) {
         if (jobs.containsKey(record.id)) return
+        // Akış izleyici zaten bir iş açtıysa, aynı yanıt için DOM izleyicinin
+        // ikinci bir iş açmasına gerek yok (sayaç şişmesin).
+        if (record.source == "dom" &&
+            jobs.values.any { System.currentTimeMillis() - it.startedAt < 10_000 }
+        ) return
         jobs[record.id] = record
         publish()
         MonitorService.start(app)

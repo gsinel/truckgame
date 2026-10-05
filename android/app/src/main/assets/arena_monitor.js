@@ -64,6 +64,13 @@
         return API_PATH_RE.test(u) || TOPIC_RE.test(u);
     }
 
+    // Sadece "/api/..." yoluyla eşleşen (konu sözcüğü geçmeyen) isteklerde
+    // gövdede gerçekten bir prompt benzeri alan var mı diye bakılır.
+    function looksLikePromptCall(url, body) {
+        if (TOPIC_RE.test(String(url))) { return true; }
+        return extractPrompt(body).length > 0;
+    }
+
     function newId(prefix) {
         seq += 1;
         return prefix + "-" + now() + "-" + seq;
@@ -90,6 +97,13 @@
         return true;
     }
 
+    // Genel taramada çöp (enum/rol adları) toplamamak için daha katı filtre.
+    function isProseLoose(value) {
+        var v = String(value);
+        if (!looksLikeProse(v)) { return false; }
+        return v.length >= 12 || /\s/.test(v) || /[.,!?;:"')]$/.test(v);
+    }
+
     function findText(node, depth) {
         if (depth > 6 || node == null) { return ""; }
         if (typeof node === "string") { return looksLikeProse(node) ? node : ""; }
@@ -99,6 +113,27 @@
             for (var i = 0; i < node.length; i++) { joined += findText(node[i], depth + 1); }
             return joined;
         }
+
+        // OpenAI biçimi: { choices: [ { delta|message|text } ] }
+        if (node.choices && node.choices.length) {
+            var openai = "";
+            for (var c = 0; c < node.choices.length; c++) {
+                var choice = node.choices[c] || {};
+                openai += findText(choice.delta || choice.message || choice, depth + 1);
+            }
+            if (openai) { return openai; }
+        }
+
+        // Gemini biçimi: { candidates: [ { content: { parts: [ { text } ] } } ] }
+        if (node.candidates && node.candidates.length) {
+            var gemini = "";
+            for (var g = 0; g < node.candidates.length; g++) {
+                gemini += findText((node.candidates[g] || {}).content, depth + 1);
+            }
+            if (gemini) { return gemini; }
+        }
+
+        // Yaygın metin alanları
         var out = "";
         for (var k = 0; k < TEXT_KEYS.length; k++) {
             var key = TEXT_KEYS[k];
@@ -112,7 +147,20 @@
                 if (out) { return out; }
             }
         }
-        return out;
+        if (out) { return out; }
+
+        // Bilinmeyen biçim: tüm alanları tara (katı filtreyle)
+        var keys = Object.keys(node);
+        var generic = "";
+        for (var j = 0; j < keys.length && j < 15; j++) {
+            var raw = node[keys[j]];
+            if (typeof raw === "string") {
+                if (isProseLoose(raw)) { generic += raw; }
+            } else {
+                generic += findText(raw, depth + 1);
+            }
+        }
+        return generic;
     }
 
     // SSE / NDJSON akış gövdesinden okunabilir metni toplar.
@@ -232,7 +280,8 @@
                 throw e;
             }
 
-            if ((method === "POST" || method === "PUT" || method === "PATCH") && isCandidate(url)) {
+            if ((method === "POST" || method === "PUT" || method === "PATCH") &&
+                isCandidate(url) && looksLikePromptCall(url, body)) {
                 var id = newId("stream");
                 start(id, "stream", url, extractPrompt(body));
                 promise.then(function (response) {
@@ -335,7 +384,8 @@
 
             var send = xhr.send;
             xhr.send = function (body) {
-                if ((method === "POST" || method === "PUT" || method === "PATCH") && isCandidate(url)) {
+                if ((method === "POST" || method === "PUT" || method === "PATCH") &&
+                    isCandidate(url) && looksLikePromptCall(url, body)) {
                     id = newId("xhr");
                     start(id, "xhr", url, extractPrompt(body));
                     try { xhr.addEventListener("progress", watchProgress); } catch (e) { /* */ }
