@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import com.fanmade.arenaai.MainActivity
 import com.fanmade.arenaai.R
 import com.fanmade.arenaai.data.Prefs
+import com.fanmade.arenaai.monitor.AppState
 import com.fanmade.arenaai.monitor.JobRecord
 import com.fanmade.arenaai.monitor.MonitorService
 import kotlin.math.abs
@@ -94,6 +95,8 @@ object Notifier {
     /** Yanıt tamamlandı bildirimi — uygulamanın kalbi. */
     fun notifyCompletion(context: Context, record: JobRecord) {
         if (!canPost(context)) return
+        // Kullanıcı zaten uygulamada/yeni sekmede bakıyorsa sesli-titreşimli bildirim basma.
+        if (!Prefs.notifyInForeground && AppState.isForeground) return
 
         val preview = if (Prefs.hideContent) "" else record.preview.trim()
         val title = context.getString(R.string.notification_reply_ready)

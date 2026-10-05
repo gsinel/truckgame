@@ -26,6 +26,7 @@ object Prefs {
     private const val K_AUTO_STOP_SECONDS = "auto_stop_seconds"
     private const val K_HISTORY = "history"
     private const val K_PENDING_PROMPT = "pending_prompt"
+    private const val K_NOTIFY_FOREGROUND = "notify_in_foreground"
 
     private lateinit var sp: SharedPreferences
 
@@ -123,6 +124,14 @@ object Prefs {
     var history: String
         get() = string(K_HISTORY, "[]")
         set(value) = putString(K_HISTORY, value)
+
+    /**
+     * Uygulama ekranda açıkken de bildirim gösterilsin mi?
+     * Varsayılan: kapalı — zaten bakıyorsan başka bir şey çalmasın.
+     */
+    var notifyInForeground: Boolean
+        get() = bool(K_NOTIFY_FOREGROUND, false)
+        set(value) = putBool(K_NOTIFY_FOREGROUND, value)
 
     /** Bildirimden yazılan hızlı yanıt; uygulama açıldığında gönderilir. */
     var pendingPrompt: String

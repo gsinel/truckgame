@@ -86,6 +86,12 @@ fun SettingsScreen(
                     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
+            Toggle(
+                "Uygulama açıkken de bildir",
+                "Kapalıyken: zaten bakarken ses/titreşim çalmaz, geçmişe yine kaydedilir",
+                Prefs.notifyInForeground,
+                refresh,
+            ) { Prefs.notifyInForeground = it }
             Toggle("Ses", null, Prefs.sound, refresh) { Prefs.sound = it }
             Toggle("Titreşim", null, Prefs.vibrate, refresh) { Prefs.vibrate = it }
             Toggle(
